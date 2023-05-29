@@ -1,0 +1,8 @@
+**/__pycache__/
+/.neptune
+/.vscode
+/csv
+/model
+/runs/model_runs.json
+
+user-vars.sh

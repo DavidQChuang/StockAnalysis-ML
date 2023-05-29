@@ -1,0 +1,59 @@
+{
+    // This contains the locations to load environment variables into before any run is read.
+    "env": {
+        // This will read the value of the env var 'EXAMPLE_APIKEY' and 
+        // set the value in the global run below.
+        "global.data_retriever.alphavantage.apikey": "EXAMPLE_APIKEY"
+    },
+
+    // This contains global values which will be merged into any run.
+    // Local run values will override these values.
+    "global": {
+        "data_retriever": {
+            "data_retriever_name": "alphavantage",
+
+            "split_ratio": 0.9,
+            "validation_split_ratio": 0.2
+        },
+        "model": {
+            "loss": "mean_squared_error",
+            "optimizer": "adam",
+            "use_gpu": false,
+
+            "dropout_rate": 0.3
+        }
+    },
+
+    "runs": {
+        // This is a run named 'run-1'.
+        "run-1": {
+            // Describes the dataset
+            "dataset_name": "alphavantage",
+            "dataset": {
+                "alphavantage": {
+                    "symbol": "TQQQ",
+
+                    "function": "TIME_SERIES_INTRADAY_EXTENDED",
+                    "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
+                                "year1month5", "year1month6", "year1month7", "year1month8" ],
+                    "interval": "5min",
+                    "outputsize": "full"
+                }
+            },
+
+            // Describes the NN architecture & input/output window
+            "model_name": "gMLP",
+            "model": {
+                "hidden_layer_size": 50,
+
+                "batch_size": 64,
+                "epochs": 12,
+
+                "gmlp": {
+                    "encoding_length": 32,
+                    "layer_count": 6
+                }
+            }
+        }
+    }
+}
