@@ -10,14 +10,7 @@ import libutil.datasets
 import libutil.models
 import libutil.traders
 
-SEED = 42
-
 def main():
-    os.environ["PYTHONHASHSEED"] = str(SEED)
-    os.environ["TF_CUDNN_DETERMINISTIC"] = "1"  # new flag present in tf 2.0+
-
-    random.seed(SEED)
-
     parser = argparse.ArgumentParser(description='Args test')
     parser.add_argument('-r', '--run-name', type=str, dest='run_name', help='Name of the run to use.')
     
@@ -42,7 +35,7 @@ def main():
     
     # Get a run from the run file
     try:
-        if args.run_file is None:
+        if args.run_name is None:
             run_data = libutil.runs.from_input("runs/model_runs.json")
         else:
             run_data = libutil.runs.from_file(args.run_file, args.run_name)
@@ -57,6 +50,7 @@ def main():
     model = libutil.models.from_run(run_data)
     # trader = libutil.traders.from_run(run_data)
     
+    model.standard_train(data)
     
     
 if __name__ == "__main__":

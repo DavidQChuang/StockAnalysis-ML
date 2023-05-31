@@ -1,3 +1,3 @@
 #!/bin/bash
-bash user-vars.sh
+source user-vars.sh
 python Predictor.py "$@"

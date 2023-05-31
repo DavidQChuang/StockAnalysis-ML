@@ -2,6 +2,10 @@ import json
 import os
 import sys
 
+def except_nokey(dict, key, desc):
+    if key not in dict:
+        raise Exception(f"'{key}' key must be present in {desc}.")
+
 def merge(a, b, path=None):
     "merges b into a without replacing existing values"
     if path is None: path = []
@@ -28,11 +32,9 @@ def from_file(path: str, run_name: str) -> dict:
         with open(path) as run_file:
             file_json = json.load(run_file)
             
-        if 'runs' not in file_json:
-            raise Exception("'runs' key must be present in runs file.")
+        except_nokey(file_json, 'runs', 'runs file')
             
         # Get environment variable data
-        run_data = {}
         
         if 'env' in file_json:
             for key, value in file_json['env'].items():
@@ -42,7 +44,7 @@ def from_file(path: str, run_name: str) -> dict:
                 env_value = os.environ[value]
                 key_path = key.split('.')
                 
-                curr = run_data
+                curr = file_json
                 for i, part in enumerate(key_path):
                     if i == len(key_path) - 1:
                         curr[part] = env_value
@@ -62,14 +64,28 @@ def from_file(path: str, run_name: str) -> dict:
         # Get runs    
         runs = file_json['runs']
         
+        for name in runs.keys():
+            if name.lower().startswith(run_name):
+                run_name = name
+                break
+        
         # Get the requested run, merge environment variables into requested without replacing requested values
-        if run_name in runs:
-            run_data = merge(runs[run_name], run_data)
-        else:
-            raise Exception("'runs' key must be present in runs file.")
+        except_nokey(runs, run_name, 'runs file; run does not exist')
+        
+        run_data = runs[run_name]
         
         # Merge global run into requested without replacing requested values
         merge(run_data, global_run_data)
+        
+        # Copy seq_len and out_seq_len into run.dataset
+        except_nokey(run_data, 'model', 'run')
+        except_nokey(run_data, 'dataset', 'run')
+        
+        run_data["dataset"]['seq_len'] = run_data["model"]["seq_len"]
+        run_data["dataset"]['out_seq_len'] = run_data["model"]["out_seq_len"]
+        
+        print(f"> Running {run_name}")
+        print()
         
         return run_data
             
@@ -110,7 +126,7 @@ def from_input(path: str) -> dict:
                 break
         
         if not run_name in run_names:
-            print('Invalid run.')
+            print('! Invalid run.')
             continue
         
         do = False

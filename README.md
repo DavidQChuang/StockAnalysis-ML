@@ -8,6 +8,7 @@ Set environment variables in user-vars.sh, then call exec.sh. Arguments are pass
 Runs are read from the JSON file in the following order after a run is selected:
 1. Environment variables are read from `'env'`, which must be an object, and are then merged into the rest of the file in the position described by the key. For example, the entry `"global.other.etc.apikey": "OTHER_APIKEY"` below will be merged into the nested dictionary `global -> other -> etc["apikey"]`, and set to the value of the environment variable `OTHER_APIKEY`. Environment variables will not change values that already exist.
 2. The selected run (one of the JSON objects within `'runs'`, such as `'run-1'` below) is read, then the global run (the JSON object under `'global'`) is merged into it. Global values will be overridden by local run values.
+3. Within the run, model.seq_len and out_seq_len are copied into dataset.seq_len and dataset.out_seq_len. 
 
 Example:
 ```

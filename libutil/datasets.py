@@ -1,16 +1,18 @@
+from torch.utils.data.dataset import Dataset
+
 from datasets.AlphaVantage import AlphaVantageDataset
 
-def from_run(run_data):
-    if 'data_retriever' not in run_data:
-        raise "'data_retriever' cannot be None."
-    if 'data_retriever_name' not in run_data:
-        raise "'data_retriever_name' cannot be None."
+def from_run(run_data) -> Dataset:
+    if 'dataset' not in run_data:
+        raise Exception("'dataset' cannot be None.")
+    if 'dataset_name' not in run_data:
+        raise Exception("'dataset_name' cannot be None.")
     
-    dataset = run_data.dataset
-    dataset_name = run_data.dataset_name
+    dataset_json = run_data["dataset"]
+    dataset_name = run_data["dataset_name"]
     
     match dataset_name:
         case 'alphavantage':
-            return AlphaVantageDataset(dataset)
+            return AlphaVantageDataset(dataset_json)
         case _:
             raise "Model not found."
