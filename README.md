@@ -37,13 +37,17 @@ $ exec.sh -r run-1
 ## Arguments
 `-r, --run-name`: Name of the run to use. If this doesn't match a run name, it will attempt to match the start of a run name, and if only one is found, it will use that run.
 
-`-rf, --run-file`: Path of the file to load the runs from.
+`-rf, --run-file`: Path of the file to load the runs from. Default is `runs/model_runs.json`.
 
-`-mf, --model-file`: Path of the file to save/load the model from.
+`-mf, --model-file`: Path of the file to save/load the model from. 
+By default, the model will determine a filename automatically based on architecture parameters, such as `SimpleLSTM-256_72+1.ckpt`.
 
-`-rm, --rebuild-model`: Used with --model-file, if true then overwrites old model.
+`-rm, --rebuild-model`: If true then overwrites old model and starts from scratch.
+Default behavior is to continue training with the existing checkpoint.
 
-`-v, --verbosity`: 
+`-d, --device`: Specifies the device to use. Possible values: `cpu`, `cuda`.
+
+`-v, --verbosity`: (not implemented)
 
 0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
 
