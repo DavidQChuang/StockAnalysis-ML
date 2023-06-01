@@ -31,19 +31,22 @@ class StandardConfig:
     out_seq_len         : int = 1
     
     @property
-    def model_filename(self, id):
-        return "%s%d_%d+%d" % (
-            id, self.hidden_layer_size, self.in_window, self.out_window)
+    def model_filename(self):
+        return "%d_%d+%d" % (
+            self.hidden_layer_size, self.seq_len, self.out_seq_len)
         
 
 import torch
-from torch import nn, optim, cuda
+import math
+from torch import nn, optim, autocast
 from torch.utils import data
+from abc import ABC, abstractmethod
 
-class StandardModule(nn.Module):
-    def __init__(self, model_json):
+class StandardModule(nn.Module, ABC):
+    def __init__(self, model_json, device=None):
         super().__init__()
         
+        self.device = device
         self.conf = StandardConfig.from_dict(model_json)
         print("> Model config: ")
         print(self.conf)
@@ -83,21 +86,41 @@ class StandardModule(nn.Module):
         
         return train_dataloader, valid_dataloader
     
+    
+    def get_filename(self):
+        filename = self.conf.model_filename
+        classname = self.__class__.__name__
+        
+        return f"{classname}-{filename}.ckpt"
+        
+    @abstractmethod
+    def standard_train(self, dataset):
+        pass
+    
+    @abstractmethod
+    def save(self, filename=None):
+        pass
+    
+    @abstractmethod
+    def load(self, filename=None):
+        pass
+    
+    @abstractmethod
     def _setup_optimizer(self):
         pass
     
     def _get_training_data(self, dataset):
         return self.get_training_data(dataset)
         
-    def train(self, dataset):
-        pass
-        
 class PytorchStandardModule(StandardModule):
-    def __init__(self, model_json):
-        super().__init__(model_json)
+    def __init__(self, model_json, device=None):
+        super().__init__(model_json, device)
         
         self.loss_func: nn.MSELoss = nn.MSELoss()
         self.optimizer: optim.Optimizer = None
+        
+        self.ckpt = None
+        self.runtime = None
         
     def _setup_optimizer(self, model):
         if not self.optimizer:
@@ -106,35 +129,48 @@ class PytorchStandardModule(StandardModule):
         return self.loss_func, self.optimizer
             
     def standard_train(self, dataset):
-        epochs = self.conf.epochs
-        
         model = self
-        if cuda.is_available():
-            model.cuda()
 
-        print('> Training model.')
+        print(f'> Training model {self.__class__.__name__}.')
         
         loss_func, optimizer = self._setup_optimizer(model)
-        train, valid = self._get_training_data(dataset)
         
-        len_n_fmt = len(str(len(train)))
-        bar_format = '{n_fmt:>%d}/{total_fmt:%d} [{bar:30}] [{elapsed} - eta: {remaining}, {rate_fmt}{postfix}]' %(len_n_fmt,len_n_fmt)
+        len_n_fmt = len(str(math.ceil((len(dataset) / self.conf.batch_size))))
+        bar_format = '{n_fmt:>%d}/{total_fmt:%d} [{bar:30}] {elapsed} - eta: {remaining}, {rate_fmt}{postfix}' %(len_n_fmt,len_n_fmt)
         def format_loss(n):
-            f = '{0:.5g}'.format(n)
+            f = '{0:.4g}'.format(n)
             f = f.replace('+0', '+')
             f = f.replace('-0', '-')
             n = str(n)
             return f if len(f) < len(n) else n
         
-        for e in range(epochs):  # loop over the dataset multiple times
-            desc_train = f"Epoch {e+1}/{epochs}"
+        first_run = self.runtime == None
+        if first_run:
+            self.runtime = {
+                'epoch': 0,
+                'loss': 0,
+                'val_loss': 0
+            }
+            
+        use_cuda = self.device == "cuda"
+        
+        run_epochs = self.conf.epochs
+        lifetime_epochs = self.runtime["epoch"] + run_epochs
+        for e in range(run_epochs):  # loop over the dataset multiple times
+            ep = e+1
+            addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
+            desc_train = f"Epoch {ep}/{run_epochs}{addl_desc}"
             desc_valid = f"Validating"
             
             print(desc_train)
             
+            # Scramble data
+            train, valid = self._get_training_data(dataset)
+            
+            # Train model
             model.train(True)
             train_loss = 0.0
-            train_progress = tqdm(train, total=len(train), bar_format=bar_format)
+            train_progress = tqdm(train, bar_format=bar_format)
             for i, data in enumerate(train_progress):
                 X    : torch.Tensor = data["X"]
                 Y_HAT: torch.Tensor = data["y"]
@@ -142,7 +178,7 @@ class PytorchStandardModule(StandardModule):
                 X = X.float()
                 Y_HAT= Y_HAT.float()
                 
-                if cuda.is_available():
+                if use_cuda:
                     X, Y_HAT = X.cuda(), Y_HAT.cuda()
 
                 # zero the parameter gradients
@@ -151,6 +187,7 @@ class PytorchStandardModule(StandardModule):
                 # criterion.zero_grad()
 
                 # forward > backward > optimize
+                # with autocast(self.device, dtype=torch.float32):
                 y = model(X)
                 loss = loss_func.forward(y, Y_HAT)
                 
@@ -160,19 +197,25 @@ class PytorchStandardModule(StandardModule):
                 # print statistics
                 train_loss += loss.item()
         
-                if i % 5 == 4:
-                    train_progress.set_postfix(loss=format_loss(train_loss / (i + 1)), refresh=False)
-                    train_progress.update(5)
+                train_progress.set_postfix(loss=format_loss(train_loss / (i + 1)), refresh=False)
+                
+            self.runtime['loss'] = train_loss / (i + 1)
             
+            # Validate results
             model.eval()
             valid_loss = 0.0
-            valid_progress = tqdm(valid, total=len(valid), bar_format=bar_format)
+            valid_progress = tqdm(valid, bar_format=bar_format)
             for i, data in enumerate(valid_progress):
-                X = data["X"].float()
-                Y_HAT = data["y"].float()
-                if cuda.is_available():
+                X    : torch.Tensor = data["X"]
+                Y_HAT: torch.Tensor = data["y"]
+                
+                X = X.float()
+                Y_HAT= Y_HAT.float()
+                
+                if use_cuda:
                     X, Y_HAT = X.cuda(), Y_HAT.cuda()
                 
+                # with autocast(self.device, dtype=torch.float32):
                 y = model(X)
                 loss = loss_func.forward(y, Y_HAT)
 
@@ -181,7 +224,53 @@ class PytorchStandardModule(StandardModule):
                 # valid_loss = loss.item() * X.size(0)
         
                 valid_progress.set_postfix(val_loss=format_loss(train_loss / (i + 1)), refresh=False)
-                valid_progress.update()
+                
+            self.runtime['val_loss'] = valid_loss / (i + 1)
+            self.runtime['epoch'] += 1
                 
             print()
-            train, valid = self._get_training_data(dataset)
+            
+    def save(self, filename=None):
+        filename = filename if filename != None else f"ckpt/{self.get_filename()}"
+        
+        print("> Saving model: ")
+        
+        if self.runtime == None:
+            raise Exception("Cannot save model without running it first.")
+        
+        ckpt = {
+            'epoch': self.runtime["epoch"],
+            'model_state': self.state_dict(),
+            'optimizer_state': self.optimizer.state_dict(),
+            'loss': self.runtime["loss"],
+            'val_loss': self.runtime["val_loss"]
+        }
+        print({
+            'epoch': ckpt['epoch'],
+            'loss': ckpt['loss'],
+            'val_loss': ckpt['val_loss']
+            })
+        print()
+        
+        torch.save(ckpt, filename)
+            
+    def load(self, filename=None):
+        filename = filename if filename != None else f"ckpt/{self.get_filename()}"
+        
+        print("> Loading model: ")
+        
+        ckpt = torch.load(filename)
+        
+        self._setup_optimizer(self)
+        
+        self.load_state_dict(ckpt['model_state'])
+        self.optimizer.load_state_dict(ckpt['optimizer_state'])
+        
+        self.runtime = {
+            'epoch': ckpt['epoch'],
+            'loss': ckpt['loss'],
+            'val_loss': ckpt['val_loss'],
+        }
+        
+        print(self.runtime)
+        print()

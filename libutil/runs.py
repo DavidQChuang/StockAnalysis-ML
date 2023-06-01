@@ -21,15 +21,15 @@ def merge(a, b, path=None):
             a[key] = b[key]
     return a
 
-def from_file(path: str, run_name: str) -> dict:
-    if path is None:
-        path="runs/model_runs.json"
+def from_file(run_file: str, run_name: str, **kwargs) -> dict:
+    if run_file is None:
+        run_file="runs/model_runs.json"
         
     if run_name is None:
         raise Exception("'run_name' cannot be None.")
         
-    if os.path.exists(path):
-        with open(path) as run_file:
+    if os.path.exists(run_file):
+        with open(run_file) as run_file:
             file_json = json.load(run_file)
             
         except_nokey(file_json, 'runs', 'runs file')
@@ -92,12 +92,12 @@ def from_file(path: str, run_name: str) -> dict:
     else:
         raise Exception("Runs file does not exist.")
     
-def from_input(path: str) -> dict:
+def from_input(run_file: str, **kwargs) -> dict:
     print("> Selecting run from input. Runs:")
     
     # Check for file
-    if os.path.exists(path):
-        with open(path) as run_file:
+    if os.path.exists(run_file):
+        with open(run_file) as run_file:
             file_json = json.load(run_file)
             
         if 'runs' not in file_json:
@@ -131,5 +131,5 @@ def from_input(path: str) -> dict:
         
         do = False
     
-    return from_file(path, run_name)
+    return from_file(run_file, run_name)
     

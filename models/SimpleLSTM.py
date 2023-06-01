@@ -23,8 +23,8 @@ class LSTMBlock(nn.Module):
         
 
 class SimpleLSTM(PytorchStandardModule):
-    def __init__(self, model_json):
-        super().__init__(model_json)
+    def __init__(self, model_json, device=None):
+        super().__init__(model_json, device)
         
         conf = self.conf
         
@@ -37,6 +37,7 @@ class SimpleLSTM(PytorchStandardModule):
             nn.Linear(input_size, size),
             nn.Dropout(conf.dropout_rate),
             
+            LSTMBlock(size),
             LSTMBlock(size),
             LSTMBlock(size),
             

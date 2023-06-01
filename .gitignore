@@ -2,6 +2,7 @@
 /.neptune
 /.vscode
 /csv
+/ckpt
 /model
 /runs/model_runs.json
 

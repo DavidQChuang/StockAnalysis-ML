@@ -2,7 +2,7 @@ from torch.utils.data.dataset import Dataset
 
 from datasets.AlphaVantage import AlphaVantageDataset
 
-def from_run(run_data) -> Dataset:
+def from_run(run_data, **kwargs) -> Dataset:
     if 'dataset' not in run_data:
         raise Exception("'dataset' cannot be None.")
     if 'dataset_name' not in run_data:
