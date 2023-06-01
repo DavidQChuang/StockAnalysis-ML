@@ -29,6 +29,7 @@ Example:
 # In user-vars.sh:
 export ALPHAVANTAGE_APIKEY=XXXX
 export OTHER_APIKEY=XXXX
+# export python_cmd="python3"
 
 # Then call exec.sh with command line args to run the program.
 $ exec.sh -r run-1

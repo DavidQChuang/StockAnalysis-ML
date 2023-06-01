@@ -1,3 +1,9 @@
 #!/bin/bash
 source user-vars.sh
-python Predictor.py "$@"
+
+if [[ -z "${python_cmd}" ]]
+then
+    python_cmd="python3"
+fi
+
+"$python_cmd" Predictor.py "$@"
