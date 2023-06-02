@@ -1,3 +1,4 @@
+from tqdm import tqdm
 from .Common import DataframeDataset
 
 import os
@@ -11,9 +12,12 @@ class AlphaVantageDataset(DataframeDataset):
         url = "https://www.alphavantage.co/query?"
         
         if 'alphavantage' not in dataset_json:
-            raise Exception("'alphavantage' key must be present in run.")
+            raise Exception("'alphavantage' key must be present in dataset parameters.")
         
         query_params = dataset_json['alphavantage']
+        
+        if 'apikey' not in query_params:
+            raise Exception("'apikey' key must be present in dataset.alphavantage parameters.")
         
         # If multiple slices, get the slices
         if 'slices' in query_params:
@@ -31,7 +35,7 @@ class AlphaVantageDataset(DataframeDataset):
         dfs = []
         
         # For each slice, download a csv
-        for slice in slices:
+        for slice in tqdm(slices, "Downloading from AlphaVantage", ncols=80):
             slice_str = "" if slice == None else "&slice=%s"%(slice)
             
             new_url = url + slice_str
@@ -81,7 +85,7 @@ class AlphaVantageDataset(DataframeDataset):
             if not 'close' in df.columns and not 'close (USD)' in df.columns:
                 print('! Failed loading data from AlphaVantage url %s: '%url)
                 print('Columns: ' + str(df.columns.values))
-                raise FileNotFoundError('Failed to retrieve data from AlphaVantage. Invalid URL %s'%url)
+                raise FileNotFoundError('Failed to retrieve data from AlphaVantage. You may have exceeded the free 5/min limit. %s'%url)
             else:
                 if not os.path.isdir('csv'):
                     os.mkdir('csv')
