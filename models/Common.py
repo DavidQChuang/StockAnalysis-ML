@@ -199,7 +199,7 @@ class PytorchStandardModule(StandardModule):
         
                 train_progress.set_postfix(loss=format_loss(train_loss / (i + 1)), refresh=False)
                 
-            self.runtime['loss'] = train_loss / (i + 1)
+            self.runtime['loss'] = train_loss / i
             
             # Validate results
             model.eval()
@@ -216,16 +216,17 @@ class PytorchStandardModule(StandardModule):
                     X, Y_HAT = X.cuda(), Y_HAT.cuda()
                 
                 # with autocast(self.device, dtype=torch.float32):
-                y = model(X)
-                loss = loss_func.forward(y, Y_HAT)
+                with torch.no_grad():
+                    y = model(X)
+                    loss = loss_func.forward(y, Y_HAT)
 
                 # print statistics
                 valid_loss += loss.item()
                 # valid_loss = loss.item() * X.size(0)
         
-                valid_progress.set_postfix(val_loss=format_loss(train_loss / (i + 1)), refresh=False)
+                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (i + 1)), refresh=False)
                 
-            self.runtime['val_loss'] = valid_loss / (i + 1)
+            self.runtime['val_loss'] = valid_loss / i
             self.runtime['epoch'] += 1
                 
             print()
