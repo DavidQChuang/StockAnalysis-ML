@@ -46,9 +46,9 @@ class SimpleLSTM(PytorchStandardModule):
 
     def forward(self, x):
         # x = self.flatten(x)
-        input_offset = x[:, 0]
+        input_offset = x[:, 0][:, None]
         
-        x = x - input_offset[:, None]
+        x = x - input_offset
         x = self.stack(x)
-        x = x + input_offset[:, None]
+        x = x + input_offset
         return x

@@ -69,15 +69,29 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
                 run_name = name
                 break
         
-        # Get the requested run, merge environment variables into requested without replacing requested values
+        # Get the requested run, merge environment variables into this run without replacing existing values
         except_nokey(runs, run_name, 'runs file; run does not exist')
         
         run_data = runs[run_name]
         
-        # Merge global run into requested without replacing requested values
+        # Check for 'copy_run' and merge it into this run without replacing existing values
+        copied_runs = set([ run_name ])
+        while 'copy_run' in run_data:
+            copy_run_name = run_data['copy_run']
+            del run_data['copy_run']
+            
+            if copy_run_name not in copied_runs:
+                print(f"Copying from run {copy_run_name}")
+            
+                except_nokey(runs, copy_run_name, 'runs file; run does not exist')
+                
+                merge(run_data, runs[copy_run_name])
+                copied_runs.add(copy_run_name)
+        
+        # Merge global run into this run without replacing existing values
         merge(run_data, global_run_data)
         
-        # Copy seq_len and out_seq_len into run.dataset
+        # Copy model.seq_len and model.out_seq_len into dataset._
         except_nokey(run_data, 'model', 'run')
         except_nokey(run_data, 'dataset', 'run')
         

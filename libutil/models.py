@@ -1,5 +1,5 @@
 from models.Common import StandardModule
-# from models.GatedMLP import GatedMLP
+from models.GatedMLP import GatedMLP
 from models.SimpleLSTM import SimpleLSTM
 # from models.TemporalFusionTransformer import TemporalFusionTransformer
 
@@ -30,12 +30,12 @@ def from_run(run_data, device=None, **kwargs) -> StandardModule:
     
     model: StandardModule = None
     match model_name:
-        # case 'gMLP':
-        #     nn = GatedMLP(model)
-        case 'LSTM':
+        case 'GatedMLP':
+            model = GatedMLP(model_json, device=device)
+        case 'SimpleLSTM':
             model = SimpleLSTM(model_json, device=device)
         # case 'TFT':
-        #     nn = TemporalFusionTransformer(model)
+        #     nn = TemporalFusionTransformer(model_json, device=device)
         
     if model == None:
         raise Exception("Model not found.")
