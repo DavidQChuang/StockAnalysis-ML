@@ -60,6 +60,7 @@ Default behavior is to continue training with the existing checkpoint.
 ## Sample run
 ```
 dqchuang@dqchuang-desktop:~/nas/stockanalysis-ml$ ./exec.sh -r intra-gmlp
+> Reading run file runs/model_runs.json
 Copying from run Intra-LSTM-TQQQ
 > Running Intra-GMLP-TQQQ
 

@@ -22,12 +22,18 @@ def merge(a, b, path=None):
     return a
 
 def from_file(run_file: str, run_name: str, **kwargs) -> dict:
-    if run_file is None:
-        run_file="runs/model_runs.json"
+    if run_file is None or run_file == "runs/model_runs.json":
+        if os.path.exists("runs/model_runs.json"):
+            run_file="runs/model_runs.json"
+        elif os.path.exists("runs/sample_runs.json"):
+            run_file="runs/sample_runs.json"
+        else:
+            raise Exception("Neither of the default run files exist.")
         
     if run_name is None:
         raise Exception("'run_name' cannot be None.")
         
+    print(f"> Reading run file {run_file}")
     if os.path.exists(run_file):
         with open(run_file) as run_file:
             file_json = json.load(run_file)

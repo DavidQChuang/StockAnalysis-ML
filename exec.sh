@@ -1,5 +1,10 @@
 #!/bin/bash
-source user-vars.sh
+
+if [ -f "user-vars.sh" ]; then
+    source user-vars.sh
+else
+    source user-vars.example.sh
+fi
 
 if [[ -z "${python_cmd}" ]]
 then

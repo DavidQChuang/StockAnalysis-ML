@@ -16,7 +16,7 @@ def main():
                         help='Name of the run to use.')
     
     parser.add_argument('-rf', '--run-file', type=str, dest='run_file',
-                        default='runs/model_runs.json',
+                        default="runs/model_runs.json",
                         help='Path of the file to load the runs from.')
     
     parser.add_argument('-mf', '--model-file', type=str, dest='model_file',
@@ -41,7 +41,7 @@ def main():
     # Parse args
     args = parser.parse_args()
     args_dict = vars(args)
-    
+        
     # Verbosity
     verbosity = 1 if args.verbosity is None else args.verbosity
     

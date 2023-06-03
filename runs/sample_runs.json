@@ -1,0 +1,123 @@
+{
+    "env": {
+        "global.dataset.alphavantage.apikey": "ALPHAVANTAGE_APIKEY"
+    },
+
+    "global": {
+        "dataset": {
+            "alphavantage": {
+                "datatype": "csv"
+            },
+
+            "scale_real_columns": [ ],
+            "scale_categorical_columns": [ ],
+            "embed_integer_columns": [ ]
+        },
+        "model": {
+            "test_split": 0.1,
+            "validation_split": 0.2,
+            "batch_size": 64,
+            "epochs": 4,
+            
+            "hidden_layer_size": 128,
+            "dropout_rate": 0.3,
+                
+            "deepspeed": {
+                "gradient_accumulation_steps": 1,
+                "optimizer": {
+                    "type": "Adam",
+                    "params": {
+                      "lr": 0.001,
+                      "betas": [
+                        0.8,
+                        0.999
+                      ],
+                      "eps": 1e-8,
+                      "weight_decay": 3e-7
+                    }
+                },
+                "scheduler": {
+                    "type": "WarmupLR",
+                    "params": {
+                        "warmup_min_lr": 0.00001,
+                        "warmup_max_lr": 0.001,
+                        "warmup_num_steps": 25000
+                    }
+                },
+                "comms_logger": {
+                    "enabled": false,
+                    "verbose": false,
+                    "prof_all": false,
+                    "debug": false
+                },
+                "zero_optimization": true,
+                "steps_per_print": 250
+            }
+        }
+    },
+
+    "runs": {
+        "Intra-LSTM-TQQQ": {
+            "neptune": {
+                "name": "Intra-LSTM",
+                "with_id": "STOC-1",
+                "tags": [ "Intraday", "LSTM", "Stock" ]
+            },
+
+            "dataset_name": "alphavantage",
+            "dataset": {
+                "alphavantage": {
+                    "symbol": "TQQQ",
+
+                    "function": "TIME_SERIES_INTRADAY_EXTENDED",
+                    "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
+                                "year1month5", "year1month6", "year1month7", "year1month8" ],
+                    "interval": "5min",
+                    "outputsize": "full"
+                }
+            },
+
+            "model_name": "SimpleLSTM",
+            "model": {
+                "seq_len": 72,
+                "out_seq_len": 1,
+            
+                "hidden_layer_size": 256
+            }
+        },
+        "Intra-Ext-LSTM-TQQQ": {
+            "copy_run": "Intra-LSTM-TQQQ",
+            "dataset": {
+                "alphavantage": {
+                    "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
+                                "year1month5", "year1month6", "year1month7", "year1month8",
+                                "year1month9", "year1month10", "year1month11", "year1month12",
+                                "year2month1", "year2month2", "year2month3", "year2month4",
+                                "year2month5", "year2month6", "year2month7", "year2month8",
+                                "year2month9", "year2month10", "year2month11", "year2month12" ]
+                }
+            }
+        },
+        "Intra-GMLP-TQQQ": {
+            "copy_run": "Intra-LSTM-TQQQ",
+            "model_name": "GatedMLP",
+            "model": {
+                "gmlp": {
+                    "encoding_length": 128,
+                    "layer_count": 12
+                }
+            }
+        },
+        "Intra-Ext-GMLP-TQQQ": {
+            "copy_run": "Intra-Ext-LSTM-TQQQ",
+            "model_name": "GatedMLP",
+            "model": {
+                "epochs": 4,
+                "gmlp": {
+                    "encoding_length": 128,
+                    "layer_count": 12
+                }
+            }
+        }
+    }
+}
