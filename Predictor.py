@@ -35,6 +35,9 @@ def main():
     parser.add_argument('-d', '--device', type=str, dest='device',
                         help='Device to run the model on (cuda, cpu).')
 
+    parser.add_argument('-ds', '--deepspeed', dest='use_deepspeed', action="store_true",
+                        help='Enables deepspeed.')
+
     # Parse args
     args = parser.parse_args()
     args_dict = vars(args)

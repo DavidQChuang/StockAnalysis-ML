@@ -47,6 +47,8 @@ Default behavior is to continue training with the existing checkpoint.
 
 `-d, --device`: Specifies the device to use. Possible values: `cpu`, `cuda`.
 
+`-ds, --deepspeed`: Uses Deepspeed to train the model instead of classic PyTorch. Deepspeed can also be used by using `Deepspeed[ModelName]` as the `model_name` in a run.
+
 `-v, --verbosity`: (not implemented)
 
 0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
@@ -54,3 +56,40 @@ Default behavior is to continue training with the existing checkpoint.
 1: default - the above + announcing each step, and stating basic operations and statistics such as the validation split and number of data rows, and small data previews.
 
 2: diagnostic - the above + model summary, 
+
+## Sample run
+```
+dqchuang@dqchuang-desktop:~/nas/stockanalysis-ml$ ./exec.sh -r intra-gmlp
+Copying from run Intra-LSTM-TQQQ
+> Running Intra-GMLP-TQQQ
+
+Downloading from AlphaVantage: 100%|█████████████| 8/8 [00:00<00:00, 160.75it/s]
+> Model loader parameters:
+Using model GatedMLP.
+Using device cuda.
+
+> Model config:
+StandardConfig(loss='mean_squared_error', optimizer='adam', test_split=0.1, validation_split=0.2, batch_size=64, epochs=4, hidden_layer_size=256, dropout_rate=0.3, seq_len=72, out_seq_len=1)
+
+Total Trainable Params: 1056170
+> Loading model from ckpt/GatedMLP-256_72+1.ckpt
+> Loading model:
+{'epoch': 36, 'loss': 0.0062811562110703005, 'val_loss': 0.005827929126098752}
+
+> Training model GatedMLP.
+Epoch 1/4; Total epochs: 37/40
+Splitting data at a 0.8 ratio: 25231/6307
+395/395 [██████████████████████████████] 00:18 - eta: 00:00, 21.80it/s, loss=0.005767
+ 99/99  [██████████████████████████████] 00:02 - eta: 00:00, 48.40it/s, val_loss=0.006156
+```
+
+## Extra: AMD ROCm installation on Ubuntu 22.04
+This worked on AMD Instinct MI25 (`gfx1030`)
+### Installing AMDGPU
+    wget https://repo.radeon.com/amdgpu-install/22.40/ubuntu/jammy/amdgpu-install_5.4.50401-1_all.deb
+    sudo apt install ./amdgpu-install_5.4.50401-1_all.deb
+    sudo amdgpu-install --accept-eula --usecase=rocm,workstation -y --vulkan=pro --opencl=rocr,legacy --rocmrelease=5.4.2
+### Installing ROCm PyTorch
+    pip install torch==2.0.1+rocm5.4.2 torchvision==0.15.2+rocm5.4.2 --index-url https://download.pytorch.org/whl/rocm5.4.2
+### Installing random libraries for DeepSpeed/ROCm not included in Ubuntu
+    sudo apt install libstdc++-12-dev libopenmpi-dev libaio-dev rocthrust-dev hipsparse-dev rocblas-dev
