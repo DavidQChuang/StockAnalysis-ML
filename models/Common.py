@@ -101,10 +101,8 @@ class StandardModule(ABC):
         
         batch_size = self.conf.batch_size
         
-        print(f"Splitting data at a {train_ratio} ratio: ", end="")
         train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
         
-        print(f"{len(train_data)}/{len(valid_data)}")
         train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
         valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
         
@@ -116,6 +114,12 @@ class StandardModule(ABC):
         classname = self.__class__.__name__
         
         return f"{classname}-{filename}.ckpt"
+    
+    def print_validation_split(self, dataset_len):
+        train_ratio = 1-self.conf.validation_split
+        train_data = int(dataset_len*train_ratio)
+        
+        print(f"Splitting data at a {train_ratio} ratio: {train_data}/{dataset_len-train_data}")
         
     @abstractmethod
     def standard_train(self, dataset):
@@ -152,6 +156,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
         model = self
 
         print(f'> Training model {self.__class__.__name__}.')
+        self.print_validation_split(len(dataset))
         
         # Loss/optimizer functions
         loss_func, optimizer = self._setup_optimizer(model)
@@ -175,6 +180,8 @@ class PytorchStandardModule(StandardModule, nn.Module):
         for e in range(run_epochs):  # loop over the dataset multiple times
             addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
+            if use_cuda:
+                print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
             # Scramble data
             train, valid = self._get_training_data(dataset)
@@ -182,10 +189,15 @@ class PytorchStandardModule(StandardModule, nn.Module):
             # Train model
             model.train(True)
             train_loss = 0.0
-            train_progress = tqdm(train, bar_format=bar_format)
-            for train_iter, data in enumerate(train_progress):
+            train_data = []
+            for data in tqdm(train, bar_format=bar_format):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
+                train_data.append({ "X": X, "y": Y_HAT })
+                
+            train_progress = tqdm(train_data, bar_format=bar_format)
+            for train_iter, data in enumerate(train_progress):
+                X, Y_HAT = data["X"], data["y"]
 
                 # zero the parameter gradients
                 model.zero_grad()
@@ -204,7 +216,8 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
                 train_progress.set_postfix(loss=format_loss(train_loss / (train_iter + 1)), refresh=False)
                 
-            
+            del train_data
+                
             # Validate results
             model.eval()
             valid_loss = 0.0
@@ -302,6 +315,7 @@ class DeepspeedWrapper(PytorchStandardModule):
         
     def standard_train(self, dataset):
         print(f'> Training model Deepspeed[{self.module.__class__.__name__}].')
+        self.print_validation_split(len(dataset))
             
         # Loss/optimizer functions
         loss_func: nn.MSELoss = nn.MSELoss()
@@ -331,10 +345,15 @@ class DeepspeedWrapper(PytorchStandardModule):
             
             # Train model
             train_loss = 0.0
-            train_progress = tqdm(train, bar_format=bar_format)
-            for train_iter, data in enumerate(train_progress):
+            train_data = []
+            for data in tqdm(train, bar_format=bar_format):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
+                train_data.append({ "X": X, "y": Y_HAT })
+                
+            train_progress = tqdm(train_data, bar_format=bar_format)
+            for train_iter, data in enumerate(train_progress):
+                X, Y_HAT = data["X"], data["y"]
                 
                 # forward > backward > optimize
                 y = self.model_engine(X)

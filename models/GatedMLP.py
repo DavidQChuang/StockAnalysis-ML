@@ -23,8 +23,8 @@ class SpatialGatingUnit(nn.Module):
         super().__init__()
         
         self.bias = nn.Parameter(torch.ones(size=(seq_len,)))
-        self.kernel = nn.Parameter(torch.zeros(size=(1, seq_len, seq_len)))
-        # self.kernel = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps))
+        # self.kernel = nn.Parameter(torch.zeros(size=(1, seq_len, seq_len)))
+        self.kernel = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps))
         
     def forward(self, x):
         residual, gate = torch.tensor_split(x, 2, dim=-1)
