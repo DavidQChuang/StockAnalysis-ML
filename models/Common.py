@@ -1,5 +1,6 @@
 import os
 from tqdm import tqdm
+import time
 
 from dataclasses import dataclass
 import inspect
@@ -169,6 +170,8 @@ class PytorchStandardModule(StandardModule, nn.Module):
         lifetime_epochs = self.runtime["epoch"] + run_epochs
         bar_format = get_bar_format(len(dataset), self.conf.batch_size)
         
+        start_time = time.time()
+        pstart_time = time.process_time()
         for e in range(run_epochs):  # loop over the dataset multiple times
             addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
@@ -180,7 +183,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
             model.train(True)
             train_loss = 0.0
             train_progress = tqdm(train, bar_format=bar_format)
-            for i, data in enumerate(train_progress):
+            for train_iter, data in enumerate(train_progress):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
 
@@ -199,14 +202,14 @@ class PytorchStandardModule(StandardModule, nn.Module):
                 if math.isnan(train_loss):
                     raise ArithmeticError("Failed training, loss = NaN")
         
-                train_progress.set_postfix(loss=format_loss(train_loss / (i + 1)), refresh=False)
+                train_progress.set_postfix(loss=format_loss(train_loss / (train_iter + 1)), refresh=False)
                 
             
             # Validate results
             model.eval()
             valid_loss = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
-            for i, data in enumerate(valid_progress):
+            for valid_iter, data in enumerate(valid_progress):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
                 
@@ -220,15 +223,15 @@ class PytorchStandardModule(StandardModule, nn.Module):
                 if math.isnan(valid_loss):
                     raise ArithmeticError("Failed training, val_loss = NaN")
         
-                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (i + 1)), refresh=False)
+                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (valid_iter + 1)), refresh=False)
                 
             self.runtime['epoch'] += 1
                 
             print()
             
-        print("Done. \n")
-        self.runtime['loss'] = train_loss / i
-        self.runtime['val_loss'] = valid_loss / i
+        print(f"Done in user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.\n")
+        self.runtime['loss'] = train_loss / train_iter
+        self.runtime['val_loss'] = valid_loss / valid_iter
             
     def save(self, filename=None):
         filename = filename if filename != None else f"ckpt/{self.get_filename()}"
@@ -317,6 +320,8 @@ class DeepspeedWrapper(PytorchStandardModule):
         lifetime_epochs = self.runtime["epoch"] + run_epochs
         bar_format = get_bar_format(len(dataset), self.conf.batch_size)
         
+        start_time = time.time()
+        pstart_time = time.process_time()
         for e in range(run_epochs):  # loop over the dataset multiple times
             addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
@@ -327,7 +332,7 @@ class DeepspeedWrapper(PytorchStandardModule):
             # Train model
             train_loss = 0.0
             train_progress = tqdm(train, bar_format=bar_format)
-            for i, data in enumerate(train_progress):
+            for train_iter, data in enumerate(train_progress):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
                 
@@ -343,12 +348,12 @@ class DeepspeedWrapper(PytorchStandardModule):
                 if math.isnan(train_loss):
                     raise ArithmeticError("Failed training, loss = NaN")
         
-                train_progress.set_postfix(loss=format_loss(train_loss / (i + 1)), refresh=False)
+                train_progress.set_postfix(loss=format_loss(train_loss / (train_iter + 1)), refresh=False)
             
             # Validate results
             valid_loss = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
-            for i, data in enumerate(valid_progress):
+            for valid_iter, data in enumerate(valid_progress):
                 X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                 Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
                 
@@ -361,15 +366,15 @@ class DeepspeedWrapper(PytorchStandardModule):
                 if math.isnan(valid_loss):
                     raise ArithmeticError("Failed training, val_loss = NaN")
         
-                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (i + 1)), refresh=False)
+                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (valid_iter + 1)), refresh=False)
                 
             self.runtime['epoch'] += 1
                 
             print()
             
-        print("Done. \n")
-        self.runtime['loss'] = train_loss / i
-        self.runtime['val_loss'] = valid_loss / i
+        print(f"Done in user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.\n")
+        self.runtime['loss'] = train_loss / train_iter
+        self.runtime['val_loss'] = valid_loss / valid_iter
             
     def get_filename(self):
         return "ds-" + self.module.get_filename()
