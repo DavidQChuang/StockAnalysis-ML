@@ -1,5 +1,6 @@
 import os
 import torch
+import einops
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -8,69 +9,6 @@ import inspect
 
 from .Common import PytorchStandardModule
 from .SimpleLSTM import LSTMBlock
-
-class SpatialGatingUnit(nn.Module):
-    def __init__(self, seq_len, init_eps = 1e-3):
-        """
-        Args:
-            d_ffn (int): dimensionality of the internal feed-forward part (hidden layer size)
-            d_model (int): dimensionality (d) of the input (embedding size)
-            seq_len (int): length of the token sequence; window size (n)
-        """
-        # (seq_len, d_model)x(d_model, d_ffn) -> (seq_len, d_ffn)
-        # (seq_len, d_ffn) -> (seq_len, d_ffn // 2), (seq_len, d_ffn // 2)
-        # (seq_len, seq_len)x(seq_len, d_ffn // 2) -> (seq_len, d_ffn // 2)
-        super().__init__()
-        
-        self.bias = nn.Parameter(torch.ones(size=(seq_len,)))
-        # self.kernel = nn.Parameter(torch.zeros(size=(1, seq_len, seq_len)))
-        self.kernel = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps))
-        
-    def forward(self, x):
-        residual, gate = torch.tensor_split(x, 2, dim=-1)
-        
-        gate = torch.matmul(self.kernel, gate)
-        gate = torch.transpose(gate, 2, 1)
-        gate = gate + self.bias[None, :]
-        gate = torch.transpose(gate, 2, 1)
-            
-        return residual * gate
-
-class GatedMLPBlock(nn.Module):
-    def __init__(self, d_ffn, d_model, seq_len, activation=None):
-        """
-        Args:
-            d_ffn (int): dimensionality of the internal feed-forward part (hidden layer size)
-            d_model (int): dimensionality (d) of the input (embedding size)
-            seq_len (int): length of the token sequence; window size (n)
-            See 'Pay Attention to MLPs' (arxiv:2105.08050)
-        """
-        # (seq_len, d_model)x(d_model, d_ffn) -> (seq_len, d_ffn)
-        # (seq_len, d_ffn) -> (seq_len, d_ffn // 2), (seq_len, d_ffn // 2)
-        # (seq_len, seq_len)x(seq_len, d_ffn // 2) -> (seq_len, d_ffn // 2)
-        super().__init__()
-        
-        self.activation = activation
-        
-        self.dropout = nn.Dropout()
-        self.normalize = nn.LayerNorm(d_model)
-        self.linear1 = nn.Linear(d_model, d_ffn)
-        self.asgu = SpatialGatingUnit(seq_len)
-        self.linear2 = nn.Linear(d_ffn // 2, d_model)
-        
-    def forward(self, x):
-        shortcut = x
-        x = self.dropout(x)
-        x = self.normalize(x)
-        x = self.linear1(x)
-        
-        if(self.activation is not None):
-            x = self.activation(x)
-        
-        x = self.asgu(x)
-        x = self.linear2(x)
-        
-        return x + shortcut
 
 @dataclass(frozen=True)    
 class GatedMLPConfig:
@@ -82,8 +20,141 @@ class GatedMLPConfig:
         })
         
     layer_count: int = 6
-    encoding_length: int = 32
+    layer_dropout: float = 0
+    embedding_length: int = 32
+    attention_size: int = 64
     
+class QKVAttention(nn.Module):
+    def __init__(self, d_in, d_out, d_ffn):
+        super().__init__()
+        self.scale = d_ffn ** -0.5
+
+        self.to_qkv = nn.Linear(d_in, d_ffn * 3, bias = False)
+        self.to_out = nn.Linear(d_ffn, d_out)
+
+    def forward(self, x):
+        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
+        
+        sim = torch.einsum('bnd,bmd->bnm', q, k) * self.scale
+        attn = sim.softmax(dim = -1)
+        out = torch.einsum('bnm,bmd->bnd', attn, v)
+        
+        return self.to_out(out)
+    
+class SpatialGatingUnit(nn.Module):
+    def __init__(self, d_ffn, seq_len, init_eps = 1e-3):
+        """
+        Args:
+            seq_len (int): length of the token sequence; window size (n)
+        """
+        super().__init__()
+        
+        # self.norm = nn.LayerNorm(d_ffn // 2)
+        self.bias = nn.Parameter(torch.ones(size=(seq_len,)))
+        self.weight = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps))
+        
+    def forward(self, x, gate_res=None):
+        weight, bias = self.weight, self.bias
+        
+        residual, gate = x.chunk(2, dim=-1)
+        # gate = self.norm(gate)
+        
+        gate = torch.matmul(weight, gate)
+        gate = torch.transpose(gate, 2, 1)
+        gate = gate + bias[None, :]
+        gate = torch.transpose(gate, 2, 1)
+        
+        if gate_res is not None:
+            gate += gate_res
+            
+        return residual * gate
+    
+class SpatialGatingUnit2(nn.Module):
+    def __init__(self, d_ffn, seq_len, heads = 4, init_eps = 1e-3):
+        """
+        Args:
+            seq_len (int): length of the token sequence; window size (n)
+        """
+        super().__init__()
+        
+        self.heads = heads
+        
+        # self.norm = nn.LayerNorm(d_ffn // 2)
+        self.bias = nn.Parameter(torch.ones(size=(heads, seq_len,)))
+        self.weight = nn.Parameter(torch.FloatTensor(size=(heads, seq_len, seq_len)).uniform_(-init_eps, init_eps))
+        
+    def forward(self, x, gate_res=None):
+        weight, bias = self.weight, self.bias
+        
+        residual, gate = x.chunk(2, dim=-1)
+        # gate = self.norm(gate)
+        
+        gate = einops.rearrange(gate, 'b n (h d) -> b h n d', h = self.heads)
+        gate = torch.einsum('b h n d, h m n -> b h m d', gate, weight)
+        gate = gate + einops.rearrange(bias, 'h n -> () h n ()')
+        gate = einops.rearrange(gate, 'b h n d -> b n (h d)')
+        
+        if gate_res is not None:
+            gate += gate_res
+            
+        return residual * gate
+
+class GatedMLPBlock(nn.Module):
+    def __init__(self, d_ffn, d_model, seq_len, d_attn=0, activation=None):
+        """
+        Args:
+            d_ffn (int): dimensionality of the internal feed-forward part (hidden layer size)
+            d_model (int): dimensionality (d) of the input (embedding size)
+            seq_len (int): length of the token sequence; window size (n)
+            See 'Pay Attention to MLPs' (arxiv:2105.08050)
+        """
+        super().__init__()
+        
+        if d_attn > 0:
+            self.attn = QKVAttention(d_model, d_ffn // 2, d_attn)
+        else:
+            self.attn = None
+        
+        self.proj_in = nn.Sequential(
+            # nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_ffn),
+            activation or nn.Identity()
+        )
+        self.sgu = SpatialGatingUnit(d_ffn, seq_len)
+        self.proj_out = nn.Linear(d_ffn // 2, d_model)
+        
+    def forward(self, x):
+        residual = x
+        
+        if self.attn is not None:
+            gate_res = self.attn(x)
+        else:
+            gate_res = None
+        
+        x = self.proj_in(x)
+        x = self.sgu(x, gate_res)
+        x = self.proj_out(x)
+        
+        return x + residual
+    
+    
+class DropoutLayers(nn.Module):
+    def __init__(self, module_list, dropout_rate):
+        if isinstance(module_list, list):
+            module_list = nn.ModuleList(module_list)
+        
+        self.layers = module_list
+        self.layer_count = len(module_list)
+        self.dropout_rate = dropout_rate
+        
+    def forward(self, x):
+        if self.training:
+            keep_idxs = torch.zeros(self.layer_count).uniform_(0, 1) > self.dropout_rate
+            for i, layer in enumerate(self.module_list):
+                if keep_idxs[i]:
+                    x = layer(x)
+            
+        return x
 
 class GatedMLP(PytorchStandardModule):
     def __init__(self, model_json, device=None):
@@ -95,56 +166,71 @@ class GatedMLP(PytorchStandardModule):
         self.conf_gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
         
         conf = self.conf
+        gmlp = self.conf_gmlp
         
+        feature_count = 1
+        embedding_length = gmlp.embedding_length
         seq_len = conf.seq_len
         output_size = conf.out_seq_len
         
         d_ffn = conf.hidden_layer_size
-        d_model = self.conf_gmlp.encoding_length
+        d_model = embedding_length * feature_count
+        d_attn = gmlp.attention_size
         
-        L = self.conf_gmlp.layer_count
+        L = gmlp.layer_count
         
         # GMLP stack
-        layers = [GatedMLPBlock(d_ffn, d_model, seq_len, activation=nn.GELU()) for i in range(L)]
+        layers = [GatedMLPBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
-        self.positional_encoding = self.get_position_encoding(seq_len, d_model)
+        self.position_embed = self.get_position_encoding(seq_len, embedding_length)
         
         # Layers
-        self.stack = nn.Sequential(*layers)
-        self.lstm = nn.LSTM(d_model, d_ffn)
-        self.unproj1 = nn.Linear(d_ffn, output_size)
-        self.unproj2 = nn.Linear(seq_len, 1)
+        self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers)
+        self.unembed = nn.Linear(d_model, output_size)
+        self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
+        self.unproj = nn.Linear(seq_len*d_ffn, output_size)
         
         if device == 'cuda':
-            self.positional_encoding = self.positional_encoding.cuda()
+            self.position_embed = self.position_embed.cuda()
 
     def forward(self, x):
-        # x = self.flatten(x)
+        # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
         input_offset = x[:, 0][:, None]
         
+        # -- Offset
         x = x - input_offset
         
         # Make sure x is shape (batch_size, seq_len, features)
-        # This unsqueezes x if it is (batch_size, seq_len)
+        # This unsqueezes x from (b, n) to (b, n, 1)
         if len(x.shape) == 2:
             x = x.unsqueeze(-1)
+        elif len(x.shape) == 4:
+            x = x.squeeze(-1)
         
         # -- Positional encoding
-        # INPUT: x: (batch_size, seq_len, features, 1), pos_enc: (None, seq_len, d_model)
-        # x = x * pos_enc: (batch_size, seq_len, features, d_model)
-        # x = x.flatten:   (batch_size, seq_len, d_model * features)
-        # GET: (batch_size, seq_len, d_model * features)
+        # INPUT: x:                     (b, n, f)
+        # INPUT: positional_encoding:   (n, d)
+        #        x = x * pos_enc:       (b, n, f, d)
+        #        x = x.reshape():       (b, n, f*d)
         x = x.unsqueeze(-1)
-        x = x * self.positional_encoding[:, None]
-        x = x.flatten(2)
+        x = x * self.position_embed[:, None]
+        x = x.reshape(x.shape[0:2]+(-1,))
         
         # -- FFN
+        # INPUT: x:                     (b, n, f*d)
+        # GET:   x = L(x):              (b, n, f*d)    
         x = self.stack(x)
-        x, hx = self.lstm(x)
         
-        # Unproject
-        x = self.unproj1(x).squeeze()
-        x = self.unproj2(x)
+        # -- Unencode
+        # INPUT: x:                     (b, n, f*d)
+        #        x = lstm(x):           (b, n, h)
+        #        x = x.reshape():       (b, n*h)
+        # GET:   x = linear(x):         (b, o)
+        x, hx = self.lstm(x)
+        x = x.reshape((x.shape[0], -1))
+        x = self.unproj(x)
+        
+        # -- Unoffset
         x = x + input_offset
         
         return x

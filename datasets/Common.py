@@ -1,4 +1,4 @@
-from pandas import DataFrame
+import pandas as pd
 
 from dataclasses import dataclass
 import inspect
@@ -23,17 +23,17 @@ from torch.utils.data.dataset import Dataset
 class DataframeDataset(Dataset):
     def __init__(self, dataset_json, forceOverwrite=False):
         self.config = StandardConfig.from_dict(dataset_json)
-        self.df = self._get_dataframe(dataset_json, forceOverwrite)
-        self.df = self.df['close']
+        self.df: pd.DataFrame = self._get_dataframe(dataset_json, forceOverwrite)
+        self.series_close: pd.Series = self.df['close']
 
     def __len__(self):
         return len(self.df) - self.config.seq_len - self.config.out_seq_len + 1
     
     def __getitem__(self, index):
-        input = self.df[index: index + self.config.seq_len]
-        output = self.df[index + self.config.seq_len: index + self.config.seq_len + self.config.out_seq_len]
+        input = self.series_close[index: index + self.config.seq_len]
+        output = self.series_close[index + self.config.seq_len: index + self.config.seq_len + self.config.out_seq_len]
         
         return { 'X': input.values, 'y': output.values }
     
-    def _get_dataframe(dataset_json, forceOverwrite=False) -> DataFrame:
+    def _get_dataframe(dataset_json, forceOverwrite=False) -> pd.DataFrame:
         pass

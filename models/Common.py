@@ -1,9 +1,15 @@
 import os
-from tqdm import tqdm
 import time
+from tqdm import tqdm
 
 from dataclasses import dataclass
 import inspect
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+from datasets.Common import DataframeDataset
 
 def get_bar_format(dataset_len, batch_size):
     len_n_fmt = len(str(math.ceil((dataset_len / batch_size))))
@@ -70,6 +76,7 @@ class StandardModule(ABC):
         
         self.device = device
         self.conf = StandardConfig.from_dict(model_json)
+        self.scaler = StandardScaler()
         
         if verbosity >= 1:
             print("> Model config: ")
@@ -121,6 +128,17 @@ class StandardModule(ABC):
         
         print(f"Splitting data at a {train_ratio} ratio: {train_data}/{dataset_len-train_data}")
         
+    def scale_dataset(self, dataset: DataframeDataset):
+        print('Fitting dataset.')
+        print('Before: ', dataset.series_close[:3])
+        
+        dataset.df['close'] = self.scaler.fit_transform(dataset.df[['close']])
+        dataset.series_close = dataset.df['close']
+        
+        print('After: ', dataset.series_close[:3])
+        
+        return dataset
+        
     @abstractmethod
     def standard_train(self, dataset):
         pass
@@ -140,7 +158,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
     def __init__(self, model_json, device=None, verbosity=1):
         super().__init__(model_json, device, verbosity)
         
-        self.loss_func: nn.MSELoss = nn.MSELoss()
+        self.loss_func = nn.MSELoss()
         self.optimizer: optim.Optimizer = None
         
         self.ckpt = None
@@ -152,11 +170,17 @@ class PytorchStandardModule(StandardModule, nn.Module):
             
         return self.loss_func, self.optimizer
             
-    def standard_train(self, dataset):
+    def standard_train(self, dataset: DataframeDataset):
         model = self
+        
+        if not isinstance(dataset, DataframeDataset):
+            raise TypeError("Dataset must be DataframeDataset.")
 
         print(f'> Training model {self.__class__.__name__}.')
         self.print_validation_split(len(dataset))
+        dataset = self.scale_dataset(dataset)
+        
+        real_loss_scale = self.scaler.scale_[0]
         
         # Loss/optimizer functions
         loss_func, optimizer = self._setup_optimizer(model)
@@ -214,7 +238,12 @@ class PytorchStandardModule(StandardModule, nn.Module):
                 if math.isnan(train_loss):
                     raise ArithmeticError("Failed training, loss = NaN")
         
-                train_progress.set_postfix(loss=format_loss(train_loss / (train_iter + 1)), refresh=False)
+                # loss = (scale(x) - scale(y))^2
+                # x = inv_scale(sqrt(loss))
+                loss=train_loss / (train_iter + 1)
+                err=math.sqrt(loss)*real_loss_scale
+                train_progress.set_postfix({
+                    "loss": format_loss(loss), "loss($)": format_loss(err) }, refresh=False)
                 
             del train_data
                 
@@ -236,7 +265,10 @@ class PytorchStandardModule(StandardModule, nn.Module):
                 if math.isnan(valid_loss):
                     raise ArithmeticError("Failed training, val_loss = NaN")
         
-                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (valid_iter + 1)), refresh=False)
+                val_loss = valid_loss / (valid_iter + 1)
+                val_err=math.sqrt(val_loss)*real_loss_scale
+                valid_progress.set_postfix({
+                    "val_loss": format_loss(val_loss), "val_loss($)": format_loss(val_err) }, refresh=False)
                 
             self.runtime['epoch'] += 1
                 
@@ -367,7 +399,8 @@ class DeepspeedWrapper(PytorchStandardModule):
                 if math.isnan(train_loss):
                     raise ArithmeticError("Failed training, loss = NaN")
         
-                train_progress.set_postfix(loss=format_loss(train_loss / (train_iter + 1)), refresh=False)
+                loss=train_loss / (train_iter + 1)
+                train_progress.set_postfix(loss=format_loss(loss), loss2=format_loss(math.sqrt(loss)), refresh=False)
             
             # Validate results
             valid_loss = 0.0
@@ -385,7 +418,8 @@ class DeepspeedWrapper(PytorchStandardModule):
                 if math.isnan(valid_loss):
                     raise ArithmeticError("Failed training, val_loss = NaN")
         
-                valid_progress.set_postfix(val_loss=format_loss(valid_loss / (valid_iter + 1)), refresh=False)
+                val_loss = valid_loss / (valid_iter + 1)
+                valid_progress.set_postfix(val_loss=format_loss(val_loss), val_loss2=format_loss(math.sqrt(val_loss)), refresh=False)
                 
             self.runtime['epoch'] += 1
                 
