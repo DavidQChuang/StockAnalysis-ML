@@ -11,4 +11,4 @@ then
     python_cmd="python3"
 fi
 
-"$python_cmd" Predictor.py "$@"
+"$python_cmd" Trainer.py "$@"
