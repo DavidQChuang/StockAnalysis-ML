@@ -52,9 +52,6 @@ def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardMo
         
     if model == None:
         raise Exception("Model not found.")
-    
-    if isinstance(model, nn.Module):
-        model = model.to(device)
         
     if use_deepspeed:
         model = DeepspeedWrapper(model, model_json, device)

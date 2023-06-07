@@ -82,45 +82,6 @@ class StandardModule(ABC):
             print("> Model config: ")
             print(self.conf)
             print()
-        
-    # def get_training_data(self, dataset):
-    #     validation_ratio = self.conf.validation_split
-    #     train_ratio = 1 - validation_ratio
-        
-    #     batch_size = self.conf.batch_size
-        
-    #     print("> Data: ")
-    #     print(f"Window: {self.conf.seq_len}+{self.conf.out_seq_len}")
-        
-    #     print(f"Splitting data at a {train_ratio} ratio: ", end="")
-    #     train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
-        
-    #     print(f"{len(train_data)}/{len(valid_data)}")
-    #     train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
-    #     valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-        
-    #     print()
-        
-    #     return train_dataloader, valid_dataloader
-    def get_training_data(self, dataset):
-        validation_ratio = self.conf.validation_split
-        train_ratio = 1 - validation_ratio
-        
-        batch_size = self.conf.batch_size
-        
-        train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
-        
-        train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
-        valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-        
-        return train_dataloader, valid_dataloader
-    
-    
-    def get_filename(self):
-        filename = self.conf.model_filename
-        classname = self.__class__.__name__
-        
-        return f"{classname}-{filename}.ckpt"
     
     def print_validation_split(self, dataset_len):
         train_ratio = 1-self.conf.validation_split
@@ -151,40 +112,96 @@ class StandardModule(ABC):
     def load(self, filename=None):
         pass
     
-    def _get_training_data(self, dataset):
-        return self.get_training_data(dataset)
+    def get_model(self):
+        return self
+    
+    def get_model_name(self):
+        return self.__class__.__name__
+    
+    def get_filename(self):
+        filename = self.conf.model_filename
+        classname = self.get_model_name()
+        
+        return f"{classname}-{filename}.ckpt"
+        
+    def get_training_data(self, dataset):
+        validation_ratio = self.conf.validation_split
+        train_ratio = 1 - validation_ratio
+        
+        batch_size = self.conf.batch_size
+        
+        train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
+        
+        train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
+        valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+        
+        return train_dataloader, valid_dataloader
         
 class PytorchStandardModule(StandardModule, nn.Module):
     def __init__(self, model_json, device=None, verbosity=1):
         super().__init__(model_json, device, verbosity)
         
-        self.loss_func = nn.MSELoss()
-        self.optimizer: optim.Optimizer = None
-        
         self.ckpt = None
         self.runtime = None
         
-    def _setup_optimizer(self, model):
-        if not self.optimizer:
-            self.optimizer = optim.Adam(model.parameters())
-            
-        return self.loss_func, self.optimizer
-            
-    def standard_train(self, dataset: DataframeDataset):
-        model = self
+        self.optimizer_state = None
         
+    def get_model(self):
+        if self.device == "cuda":
+            return self.cuda()
+        else:
+            return self.cpu()
+        
+    def get_loss_func(self):
+        return nn.MSELoss()
+    
+    def get_optimizer(self, model):
+        optimizer = optim.Adam(model.parameters())
+        
+        if self.optimizer_state is not None:
+            optimizer.load_state_dict(self.optimizer_state)
+        
+        return optimizer
+            
+    def single_train(self, model, X, Y_HAT, loss_func, optimizer):
+        # zero the parameter gradients
+        model.zero_grad()
+
+        # forward > backward > optimize
+        y    : torch.Tensor = model(X)
+        loss : torch.Tensor = loss_func.forward(y, Y_HAT)
+        
+        loss.backward()
+        optimizer.step()
+        
+        return y, loss
+            
+    def single_infer(self, model, X, Y_HAT, loss_func):
+        y    : torch.Tensor = model(X)
+        loss : torch.Tensor = loss_func.forward(y, Y_HAT)
+        
+        return y, loss
+    
+    def standard_train(self, dataset: DataframeDataset):
         if not isinstance(dataset, DataframeDataset):
             raise TypeError("Dataset must be DataframeDataset.")
-
-        print(f'> Training model {self.__class__.__name__}.')
-        self.print_validation_split(len(dataset))
-        dataset = self.scale_dataset(dataset)
         
+        # -- Setup
+        use_cuda = self.device == "cuda"
+        model: nn.Module = self.get_model()
+
+        print(f'> Training model {self.get_model_name()}.')
+        self.print_validation_split(len(dataset))
+        
+        # Scale data
+        dataset = self.scale_dataset(dataset)
         real_loss_scale = self.scaler.scale_[0]
         
         # Loss/optimizer functions
-        loss_func, optimizer = self._setup_optimizer(model)
+        loss_func = self.get_loss_func()
+        optimizer = self.get_optimizer(model)
         
+        # Runtime logging stuff
         first_run = self.runtime == None
         if first_run:
             self.runtime = {
@@ -192,23 +209,25 @@ class PytorchStandardModule(StandardModule, nn.Module):
                 'loss': 0,
                 'val_loss': 0
             }
-            
-        use_cuda = self.device == "cuda"
         
+        # Current session epochs & lifetime epochs
         run_epochs = self.conf.epochs
         lifetime_epochs = self.runtime["epoch"] + run_epochs
-        bar_format = get_bar_format(len(dataset), self.conf.batch_size)
         
+        # Time realtime and cpu time
         start_time = time.time()
         pstart_time = time.process_time()
-        for e in range(run_epochs):  # loop over the dataset multiple times
+        bar_format = get_bar_format(len(dataset), self.conf.batch_size)
+        
+        # -- Training
+        for e in range(run_epochs):
             addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
             if use_cuda:
                 print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
             # Scramble data
-            train, valid = self._get_training_data(dataset)
+            train, valid = self.get_training_data(dataset)
             
             # Train model
             model.train(True)
@@ -223,15 +242,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
             for train_iter, data in enumerate(train_progress):
                 X, Y_HAT = data["X"], data["y"]
 
-                # zero the parameter gradients
-                model.zero_grad()
-
-                # forward > backward > optimize
-                y = model(X)
-                loss = loss_func.forward(y, Y_HAT)
-                
-                loss.backward()
-                optimizer.step()
+                y, loss = self.single_train(model, X, Y_HAT, loss_func, optimizer)
 
                 # print statistics
                 train_loss += loss.item()
@@ -251,24 +262,22 @@ class PytorchStandardModule(StandardModule, nn.Module):
             model.eval()
             valid_loss = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
-            for valid_iter, data in enumerate(valid_progress):
-                X    : torch.Tensor = format_tensor(data["X"], use_cuda)
-                Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
-                
-                # with autocast(self.device, dtype=torch.float32):
-                with torch.no_grad():
-                    y = model(X)
-                    loss = loss_func.forward(y, Y_HAT)
+            with torch.no_grad():
+                for valid_iter, data in enumerate(valid_progress):
+                    X    : torch.Tensor = format_tensor(data["X"], use_cuda)
+                    Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
+                    
+                    y, loss = self.single_infer(model, X, Y_HAT, loss_func)
 
-                # print statistics
-                valid_loss += loss.item()
-                if math.isnan(valid_loss):
-                    raise ArithmeticError("Failed training, val_loss = NaN")
-        
-                val_loss = valid_loss / (valid_iter + 1)
-                val_err=math.sqrt(val_loss)*real_loss_scale
-                valid_progress.set_postfix({
-                    "val_loss": format_loss(val_loss), "val_loss($)": format_loss(val_err) }, refresh=False)
+                    # print statistics
+                    valid_loss += loss.item()
+                    if math.isnan(valid_loss):
+                        raise ArithmeticError("Failed training, val_loss = NaN")
+            
+                    val_loss = valid_loss / (valid_iter + 1)
+                    val_err=math.sqrt(val_loss)*real_loss_scale
+                    valid_progress.set_postfix({
+                        "val_loss": format_loss(val_loss), "val_loss($)": format_loss(val_err) }, refresh=False)
                 
             self.runtime['epoch'] += 1
                 
@@ -277,6 +286,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
         print(f"Done in user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.\n")
         self.runtime['loss'] = train_loss / train_iter
         self.runtime['val_loss'] = valid_loss / valid_iter
+        self.optimizer_state = None if optimizer is None else optimizer.state_dict()
             
     def save(self, filename=None):
         filename = filename if filename != None else f"ckpt/{self.get_filename()}"
@@ -289,7 +299,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
         ckpt = {
             'epoch': self.runtime["epoch"],
             'model_state': self.state_dict(),
-            'optimizer_state': self.optimizer.state_dict(),
+            'optimizer_state': self.optimizer_state,
             'loss': self.runtime["loss"],
             'val_loss': self.runtime["val_loss"]
         }
@@ -309,10 +319,8 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
         ckpt = torch.load(filename)
         
-        self._setup_optimizer(self)
-        
         self.load_state_dict(ckpt['model_state'])
-        self.optimizer.load_state_dict(ckpt['optimizer_state'])
+        self.optimizer_state = ckpt['optimizer_state']
         
         self.runtime = {
             'epoch': ckpt['epoch'],
@@ -341,93 +349,25 @@ class DeepspeedWrapper(PytorchStandardModule):
         
         self.module = module
         self.model_engine = model_engine
+        self.optimizer = optimizer
         
-    def _setup_optimizer(self, model):
-        self.optimizer = self.model_engine
+    def get_optimizer(self, model):
+        return None
         
-    def standard_train(self, dataset):
-        print(f'> Training model Deepspeed[{self.module.__class__.__name__}].')
-        self.print_validation_split(len(dataset))
-            
-        # Loss/optimizer functions
-        loss_func: nn.MSELoss = nn.MSELoss()
+    def single_train(self, model, X, Y_HAT, loss_func, optimizer):
+        y = self.model_engine(X)
+        loss = loss_func.forward(y, Y_HAT)
         
-        first_run = self.runtime == None
-        if first_run:
-            self.runtime = {
-                'epoch': 0,
-                'loss': 0,
-                'val_loss': 0
-            }
+        self.model_engine.backward(loss)
+        self.model_engine.step()
         
-        use_cuda = self.device == "cuda"
+        return y, loss
         
-        run_epochs = self.conf.epochs
-        lifetime_epochs = self.runtime["epoch"] + run_epochs
-        bar_format = get_bar_format(len(dataset), self.conf.batch_size)
+    def single_infer(self, model, X, Y_HAT, loss_func):
+        y = self.model_engine(X)
+        loss = loss_func.forward(y, Y_HAT)
         
-        start_time = time.time()
-        pstart_time = time.process_time()
-        for e in range(run_epochs):  # loop over the dataset multiple times
-            addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
-            print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
-            
-            # Scramble data
-            train, valid = self._get_training_data(dataset)
-            
-            # Train model
-            train_loss = 0.0
-            train_data = []
-            for data in tqdm(train, bar_format=bar_format):
-                X    : torch.Tensor = format_tensor(data["X"], use_cuda)
-                Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
-                train_data.append({ "X": X, "y": Y_HAT })
-                
-            train_progress = tqdm(train_data, bar_format=bar_format)
-            for train_iter, data in enumerate(train_progress):
-                X, Y_HAT = data["X"], data["y"]
-                
-                # forward > backward > optimize
-                y = self.model_engine(X)
-                loss = loss_func.forward(y, Y_HAT)
-                
-                self.model_engine.backward(loss)
-                self.model_engine.step()
-
-                # print statistics
-                train_loss += loss.item()
-                if math.isnan(train_loss):
-                    raise ArithmeticError("Failed training, loss = NaN")
-        
-                loss=train_loss / (train_iter + 1)
-                train_progress.set_postfix(loss=format_loss(loss), loss2=format_loss(math.sqrt(loss)), refresh=False)
-            
-            # Validate results
-            valid_loss = 0.0
-            valid_progress = tqdm(valid, bar_format=bar_format)
-            for valid_iter, data in enumerate(valid_progress):
-                X    : torch.Tensor = format_tensor(data["X"], use_cuda)
-                Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
-                
-                with torch.no_grad():
-                    y = self.model_engine(X)
-                    loss = loss_func.forward(y, Y_HAT)
-
-                # print statistics
-                valid_loss += loss.item()
-                if math.isnan(valid_loss):
-                    raise ArithmeticError("Failed training, val_loss = NaN")
-        
-                val_loss = valid_loss / (valid_iter + 1)
-                valid_progress.set_postfix(val_loss=format_loss(val_loss), val_loss2=format_loss(math.sqrt(val_loss)), refresh=False)
-                
-            self.runtime['epoch'] += 1
-                
-            print()
-            
-        print(f"Done in user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.\n")
-        self.runtime['loss'] = train_loss / train_iter
-        self.runtime['val_loss'] = valid_loss / valid_iter
+        return y, loss
             
     def get_filename(self):
         return "ds-" + self.module.get_filename()
