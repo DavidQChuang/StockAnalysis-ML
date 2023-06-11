@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from .Common import DataframeDataset
+from .Common import DatasetConfig, TimeSeriesDataset
 
 import os
 import re
@@ -7,8 +7,14 @@ import pandas as pd
 from datetime import date
 from urllib.parse import urlencode
 
-class AlphaVantageDataset(DataframeDataset):
-    def _get_dataframe(self, dataset_json, forceOverwrite=False):
+class AlphaVantageDataset(TimeSeriesDataset):
+    def __init__(self, dataset_json):
+        conf = DatasetConfig.from_dict(dataset_json)
+        df = self.get_dataframe(dataset_json)
+        
+        super().__init__(df, conf.seq_len, conf.out_seq_len)
+    
+    def get_dataframe(self, dataset_json, forceOverwrite=False):
         url = "https://www.alphavantage.co/query?"
         
         if 'alphavantage' not in dataset_json:

@@ -9,7 +9,13 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from datasets.Common import DataframeDataset
+from datasets.Common import TimeSeriesDataset
+        
+import torch
+import math
+from torch import nn, optim, autocast
+from torch.utils import data
+from abc import ABC, abstractmethod
 
 def get_bar_format(dataset_len, batch_size):
     len_n_fmt = len(str(math.ceil((dataset_len / batch_size))))
@@ -31,8 +37,22 @@ def format_tensor(t, use_cuda):
         
     return t
 
+def count_parameters(model):
+    # table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad: continue
+        params = parameter.numel()
+        # table.add_row([name, params])
+        total_params+=params
+        
+    # print(table)
+    print(f"Total trainable params: {total_params}")
+    return total_params
+
 @dataclass(frozen=True)
-class StandardConfig:
+class ModelConfig:
     # https://stackoverflow.com/questions/54678337/how-does-one-ignore-extra-arguments-passed-to-a-dataclass
     @classmethod
     def from_dict(cls, env):      
@@ -58,24 +78,19 @@ class StandardConfig:
     seq_len             : int = 24
     out_seq_len         : int = 1
     
+    precompile          : bool = False
+    
     @property
     def model_filename(self):
         return "%d_%d+%d" % (
             self.hidden_layer_size, self.seq_len, self.out_seq_len)
-        
 
-import torch
-import math
-from torch import nn, optim, autocast
-from torch.utils import data
-from abc import ABC, abstractmethod
-
-class StandardModule(ABC):
+class StandardModel(ABC):
     def __init__(self, model_json, device=None, verbosity=1):
         super().__init__()
         
         self.device = device
-        self.conf = StandardConfig.from_dict(model_json)
+        self.conf = ModelConfig.from_dict(model_json)
         self.scaler = StandardScaler()
         
         if verbosity >= 1:
@@ -89,19 +104,28 @@ class StandardModule(ABC):
         
         print(f"Splitting data at a {train_ratio} ratio: {train_data}/{dataset_len-train_data}")
         
-    def scale_dataset(self, dataset: DataframeDataset):
+    def scale_dataset(self, dataset: TimeSeriesDataset, fit=False):
         print('Fitting dataset.')
-        print('Before: ', dataset.series_close[:3])
+        print('Before: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
         
-        dataset.df['close'] = self.scaler.fit_transform(dataset.df[['close']])
-        dataset.series_close = dataset.df['close']
+        if fit:
+            dataset.df['close'] = self.scaler.fit_transform(dataset.df[['close']])
+            dataset.series_close = dataset.df['close']
+        else:
+            dataset.df['close'] = self.scaler.transform(dataset.df[['close']])
+            dataset.series_close = dataset.df['close']
         
-        print('After: ', dataset.series_close[:3])
+        print('After: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
+        print()
         
         return dataset
         
     @abstractmethod
     def standard_train(self, dataset):
+        pass
+    
+    @abstractmethod
+    def infer(self, X, scale_inputs=False):
         pass
     
     @abstractmethod
@@ -111,9 +135,6 @@ class StandardModule(ABC):
     @abstractmethod
     def load(self, filename=None):
         pass
-    
-    def get_model(self):
-        return self
     
     def get_model_name(self):
         return self.__class__.__name__
@@ -132,43 +153,52 @@ class StandardModule(ABC):
         
         train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
         
-        train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
-        valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+        train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
+        valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
         
         return train_dataloader, valid_dataloader
         
-class PytorchStandardModule(StandardModule, nn.Module):
-    def __init__(self, model_json, device=None, verbosity=1):
+class PytorchModel(StandardModel):
+    def __init__(self, network: nn.Module, model_json: dict, device=None, verbosity=1):
         super().__init__(model_json, device, verbosity)
         
         self.ckpt = None
         self.runtime = None
+        self.module = network
+        self.model_name = network.__class__.__name__
+        
+        torch.set_float32_matmul_precision('high')
+        
+        if device == "cuda":
+            self.module = self.module.float().cuda()
+        else:
+            self.module = self.module.float().cpu()
+            
+        if self.conf.precompile:
+            self.module = torch.compile(self.module)
         
         self.optimizer_state = None
         
-    def get_model(self):
-        if self.device == "cuda":
-            return self.cuda()
-        else:
-            return self.cpu()
-        
+    def get_model_name(self):
+        return self.model_name
+    
     def get_loss_func(self):
         return nn.MSELoss()
     
-    def get_optimizer(self, model):
-        optimizer = optim.Adam(model.parameters())
+    def get_optimizer(self):
+        optimizer = optim.Adam(self.module.parameters())
         
         if self.optimizer_state is not None:
             optimizer.load_state_dict(self.optimizer_state)
         
         return optimizer
             
-    def single_train(self, model, X, Y_HAT, loss_func, optimizer):
+    def single_train(self, X, Y_HAT, loss_func, optimizer):
         # zero the parameter gradients
-        model.zero_grad()
+        self.module.zero_grad()
 
         # forward > backward > optimize
-        y    : torch.Tensor = model(X)
+        y    : torch.Tensor = self.module(X)
         loss : torch.Tensor = loss_func.forward(y, Y_HAT)
         
         loss.backward()
@@ -176,30 +206,60 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
         return y, loss
             
-    def single_infer(self, model, X, Y_HAT, loss_func):
-        y    : torch.Tensor = model(X)
-        loss : torch.Tensor = loss_func.forward(y, Y_HAT)
-        
-        return y, loss
+    def single_infer(self, X, Y_HAT, loss_func):
+        with torch.no_grad():
+            y    : torch.Tensor = self.module(X)
+            loss : torch.Tensor = loss_func.forward(y, Y_HAT)
+            
+            return y, loss
     
-    def standard_train(self, dataset: DataframeDataset):
-        if not isinstance(dataset, DataframeDataset):
-            raise TypeError("Dataset must be DataframeDataset.")
+    def infer(self, X, scale_inputs=False):
+        with torch.no_grad():
+            if scale_inputs:
+                input = torch.tensor(X).cpu()
+                if len(input.shape) == 1:
+                    input = input[None, :]
+                
+                shape = input.shape
+                input = input.reshape((input.numel(), 1))
+                input = torch.tensor(self.scaler.transform(input.numpy())).to(self.device)
+                input = input.reshape(shape)
+            else:
+                input = torch.tensor(X)
+            
+            output = self.module.forward(input).cpu()
+            shape = output.shape
+            output = output.reshape((output.numel(), 1))
+            output = torch.tensor(self.scaler.inverse_transform(output.numpy())).to(self.device)
+            
+            return output.reshape(shape)
+    
+    def standard_train(self, dataset: TimeSeriesDataset):
+        if not isinstance(dataset, TimeSeriesDataset):
+            raise TypeError("Dataset must be TimeSeriesDataset.")
+        
+        if self.conf.epochs == 0:
+            print(f'> Zero epochs. Skipping training model {self.get_model_name()}.')
+            print()
+            return
         
         # -- Setup
         use_cuda = self.device == "cuda"
-        model: nn.Module = self.get_model()
+        module: nn.Module = self.module
 
         print(f'> Training model {self.get_model_name()}.')
+        count_parameters(module)
+        print()
         self.print_validation_split(len(dataset))
         
         # Scale data
-        dataset = self.scale_dataset(dataset)
+        print()
+        dataset = self.scale_dataset(dataset, True)
         real_loss_scale = self.scaler.scale_[0]
         
         # Loss/optimizer functions
         loss_func = self.get_loss_func()
-        optimizer = self.get_optimizer(model)
+        optimizer = self.get_optimizer()
         
         # Runtime logging stuff
         first_run = self.runtime == None
@@ -230,7 +290,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
             train, valid = self.get_training_data(dataset)
             
             # Train model
-            model.train(True)
+            module.train(True)
             train_loss = 0.0
             train_data = []
             for data in tqdm(train, bar_format=bar_format):
@@ -242,7 +302,8 @@ class PytorchStandardModule(StandardModule, nn.Module):
             for train_iter, data in enumerate(train_progress):
                 X, Y_HAT = data["X"], data["y"]
 
-                y, loss = self.single_train(model, X, Y_HAT, loss_func, optimizer)
+                # zero the parameter gradients
+                y, loss = self.single_train(X, Y_HAT, loss_func, optimizer)
 
                 # print statistics
                 train_loss += loss.item()
@@ -259,7 +320,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
             del train_data
                 
             # Validate results
-            model.eval()
+            module.eval()
             valid_loss = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
             with torch.no_grad():
@@ -267,7 +328,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
                     X    : torch.Tensor = format_tensor(data["X"], use_cuda)
                     Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
                     
-                    y, loss = self.single_infer(model, X, Y_HAT, loss_func)
+                    y, loss = self.single_infer(X, Y_HAT, loss_func)
 
                     # print statistics
                     valid_loss += loss.item()
@@ -298,7 +359,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
         ckpt = {
             'epoch': self.runtime["epoch"],
-            'model_state': self.state_dict(),
+            'model_state': self.module.state_dict(),
             'optimizer_state': self.optimizer_state,
             'loss': self.runtime["loss"],
             'val_loss': self.runtime["val_loss"]
@@ -319,7 +380,7 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
         ckpt = torch.load(filename)
         
-        self.load_state_dict(ckpt['model_state'])
+        self.module.load_state_dict(ckpt['model_state'])
         self.optimizer_state = ckpt['optimizer_state']
         
         self.runtime = {
@@ -333,9 +394,9 @@ class PytorchStandardModule(StandardModule, nn.Module):
         
 import deepspeed
         
-class DeepspeedWrapper(PytorchStandardModule):
-    def __init__(self, module: StandardModule, model_json, device=None, verbosity=1):
-        super().__init__(model_json, device, verbosity=0)
+class DeepspeedModel(PytorchModel):
+    def __init__(self, module: StandardModel, model_json, device=None, verbosity=1):
+        super().__init__(module, model_json, device, verbosity=0)
         
         if 'deepspeed' not in model_json:
             raise Exception("'deepspeed' key must be present in model parameters.")
@@ -344,17 +405,16 @@ class DeepspeedWrapper(PytorchStandardModule):
         model_json['deepspeed']['train_batch_size'] = model_json['batch_size']
         
         model_engine, optimizer, _, _ = deepspeed.initialize(config=model_json['deepspeed'],
-                                                     model=module,
-                                                     model_parameters=module.parameters())
+                                                     model=self.module,
+                                                     model_parameters=self.module.parameters())
         
-        self.module = module
         self.model_engine = model_engine
         self.optimizer = optimizer
         
     def get_optimizer(self, model):
         return None
         
-    def single_train(self, model, X, Y_HAT, loss_func, optimizer):
+    def single_train(self, X, Y_HAT, loss_func, optimizer):
         y = self.model_engine(X)
         loss = loss_func.forward(y, Y_HAT)
         
@@ -363,14 +423,14 @@ class DeepspeedWrapper(PytorchStandardModule):
         
         return y, loss
         
-    def single_infer(self, model, X, Y_HAT, loss_func):
+    def single_infer(self, X, Y_HAT, loss_func):
         y = self.model_engine(X)
         loss = loss_func.forward(y, Y_HAT)
         
         return y, loss
             
     def get_filename(self):
-        return "ds-" + self.module.get_filename()
+        return "ds-" + super().get_filename()
     
     def save(self, filename=None):
         filename = filename if filename != None else f"ckpt/{self.get_filename()}"

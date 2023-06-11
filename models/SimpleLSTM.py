@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .Common import PytorchStandardModule
+from .Common import ModelConfig, PytorchModel
 
 class LSTMBlock(nn.Module):
     def __init__(self, size):
@@ -22,11 +22,14 @@ class LSTMBlock(nn.Module):
         
         
 
-class SimpleLSTM(PytorchStandardModule):
-    def __init__(self, model_json, device=None):
-        super().__init__(model_json, device)
+class SimpleLSTM(nn.Module):
+    def __init__(self, model_json):
+        super().__init__()
         
-        conf = self.conf
+        if "gmlp" not in model_json:
+            raise Exception("'gmlp' key must be present in model.gmlp parameters.")
+        
+        conf = ModelConfig.from_dict(model_json)
         
         input_size = conf.seq_len
         output_size = conf.out_seq_len

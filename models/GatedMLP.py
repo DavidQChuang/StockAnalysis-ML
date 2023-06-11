@@ -3,11 +3,12 @@ import torch
 import einops
 from torch import nn
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from dataclasses import dataclass
 import inspect
 
-from .Common import PytorchStandardModule
+from .Common import ModelConfig, PytorchModel
 from .SimpleLSTM import LSTMBlock
 
 @dataclass(frozen=True)    
@@ -156,17 +157,15 @@ class DropoutLayers(nn.Module):
             
         return x
 
-class GatedMLP(PytorchStandardModule):
-    def __init__(self, model_json, device=None):
-        super().__init__(model_json, device)
+class GatedMLP(nn.Module):
+    def __init__(self, model_json):
+        super().__init__()
         
         if "gmlp" not in model_json:
             raise Exception("'gmlp' key must be present in model.gmlp parameters.")
         
-        self.conf_gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
-        
-        conf = self.conf
-        gmlp = self.conf_gmlp
+        gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
+        conf = ModelConfig.from_dict(model_json)
         
         feature_count = 1
         embedding_length = gmlp.embedding_length
@@ -182,38 +181,39 @@ class GatedMLP(PytorchStandardModule):
         # GMLP stack
         layers = [GatedMLPBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
-        self.position_embed = self.get_position_encoding(seq_len, embedding_length)
+        position_embed = self.get_position_encoding(seq_len, embedding_length)
+        self.register_buffer("position_embed", position_embed, True)
         
         # Layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers)
         self.unembed = nn.Linear(d_model, output_size)
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
         self.unproj = nn.Linear(seq_len*d_ffn, output_size)
-        
-        if device == 'cuda':
-            self.position_embed = self.position_embed.cuda()
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
-        input_offset = x[:, 0][:, None]
-        
-        # -- Offset
-        x = x - input_offset
         
         # Make sure x is shape (batch_size, seq_len, features)
         # This unsqueezes x from (b, n) to (b, n, 1)
+        if len(x.shape) == 1:
+            x = x[None, :]
         if len(x.shape) == 2:
-            x = x.unsqueeze(-1)
-        elif len(x.shape) == 4:
-            x = x.squeeze(-1)
+            x = x.unsqueeze(2)
+        
+        input_offset = x[:, 0]
+        
+        # -- Offset
+        # INPUT: x:                     (b, n, f)
+        # INPUT: x[:, 0][:, None]:      (b, 1)
+        x = x - input_offset[:, None]
         
         # -- Positional encoding
         # INPUT: x:                     (b, n, f)
         # INPUT: positional_encoding:   (n, d)
+        #        pos_enc[None, :]:      (1, n, d)
         #        x = x * pos_enc:       (b, n, f, d)
         #        x = x.reshape():       (b, n, f*d)
-        x = x.unsqueeze(-1)
-        x = x * self.position_embed[:, None]
+        x = x * self.position_embed[None, :]
         x = x.reshape(x.shape[0:2]+(-1,))
         
         # -- FFN
@@ -227,10 +227,13 @@ class GatedMLP(PytorchStandardModule):
         #        x = x.reshape():       (b, n*h)
         # GET:   x = linear(x):         (b, o)
         x, hx = self.lstm(x)
+        x = F.relu(x)
         x = x.reshape((x.shape[0], -1))
         x = self.unproj(x)
         
         # -- Unoffset
+        # INPUT: x:                     (b, o)
+        # INPUT: input_offset:          (b, 1)
         x = x + input_offset
         
         return x

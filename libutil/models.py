@@ -1,4 +1,4 @@
-from models.Common import StandardModule, DeepspeedWrapper
+from models.Common import PytorchModel, StandardModel, DeepspeedModel
 from models.GatedMLP import GatedMLP
 from models.SimpleLSTM import SimpleLSTM
 # from models.TemporalFusionTransformer import TemporalFusionTransformer
@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 import re
 from prettytable import PrettyTable
 
-def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardModule:
+def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardModel:
     if 'model' not in run_data:
         raise Exception("'model' cannot be None.")
     if 'model_name' not in run_data:
@@ -40,35 +40,26 @@ def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardMo
     
     print()
     
-    model: StandardModule = None
+    network = None
     match model_name:
         case 'GatedMLP':
-            model = GatedMLP(model_json, device=device)
+            network = GatedMLP(model_json)
         case 'SimpleLSTM':
-            model = SimpleLSTM(model_json, device=device)
+            network = SimpleLSTM(model_json)
         # case 'TFT':
         #     nn = TemporalFusionTransformer(model_json, device=device)
-    count_parameters(model)
         
-    if model == None:
+    if network == None:
         raise Exception("Model not found.")
-        
-    if use_deepspeed:
-        model = DeepspeedWrapper(model, model_json, device)
+    
+    if isinstance(network, nn.Module):
+        if use_deepspeed:
+            model = DeepspeedModel(network, model_json, device=device)
+        else:
+            model = PytorchModel(network, model_json, device=device)
+    else:
+        raise TypeError("Invalid network type")
     
     return model
         
         
-def count_parameters(model):
-    # table = PrettyTable(["Modules", "Parameters"])
-    total_params = 0
-    
-    for name, parameter in model.named_parameters():
-        if not parameter.requires_grad: continue
-        params = parameter.numel()
-        # table.add_row([name, params])
-        total_params+=params
-        
-    # print(table)
-    print(f"Total Trainable Params: {total_params}")
-    return total_params

@@ -85,7 +85,7 @@ Splitting data at a 0.8 ratio: 25231/6307
 ```
 
 ## Extra: AMD ROCm installation on Ubuntu 22.04
-This worked on AMD Instinct MI25 (`gfx1030`)
+This worked on AMD Instinct MI25 (`gfx900`)
 ### Installing AMDGPU
     wget https://repo.radeon.com/amdgpu-install/22.40/ubuntu/jammy/amdgpu-install_5.4.50401-1_all.deb
     sudo apt install ./amdgpu-install_5.4.50401-1_all.deb
@@ -94,3 +94,15 @@ This worked on AMD Instinct MI25 (`gfx1030`)
     pip install torch==2.0.1+rocm5.4.2 torchvision==0.15.2+rocm5.4.2 --index-url https://download.pytorch.org/whl/rocm5.4.2
 ### Installing random libraries for DeepSpeed/ROCm not included in Ubuntu
     sudo apt install libstdc++-12-dev libopenmpi-dev libaio-dev rocthrust-dev hipsparse-dev rocblas-dev
+### Fix for ROCm torch.compile error:
+See [pytorch/pytorch#98707](https://github.com/pytorch/pytorch/issues/98707).
+
+Remove `/tmp/*` files, then add `export ROCM_PATH=/opt/rocm` to user-vars.sh.
+For me, it was sufficient to `rm -rf /tmp/*` without sudo and add the variable.
+
+Fixes:
+    
+    ...
+    SystemError: <built-in function load_binary> returned NULL without setting an exception
+
+    

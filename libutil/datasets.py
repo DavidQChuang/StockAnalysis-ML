@@ -1,7 +1,7 @@
 from datasets.AlphaVantage import AlphaVantageDataset
-from datasets.Common import DataframeDataset
+from datasets.Common import TimeSeriesDataset
 
-def from_run(run_data, **kwargs) -> DataframeDataset:
+def from_run(run_data, **kwargs) -> TimeSeriesDataset:
     if 'dataset' not in run_data:
         raise Exception("'dataset' cannot be None.")
     if 'dataset_name' not in run_data:

@@ -1,1 +1,2 @@
 export ALPHAVANTAGE_APIKEY=XXXX
+export ROCM_PATH=/opt/rocm
