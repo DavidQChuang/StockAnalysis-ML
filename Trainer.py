@@ -23,8 +23,15 @@ def main():
                         help='Overrides the default path of the file to save/load the model from.'
                         +    'By default, the model decides a filename based on its parameters.')
     
+    parser.add_argument('-tf', '--trader-file', type=str, dest='trader_file',
+                        help='Overrides the default path of the file to save/load the model from.'
+                        +    'By default, the model decides a filename based on its parameters.')
+    
     parser.add_argument('-rm', '--rebuild-model', dest='rebuild_model', action="store_true",
                         help='Used with --model-file, if true then overwrites old model.')
+    
+    parser.add_argument('-rt', '--rebuild-trader', dest='rebuild_trader', action="store_true",
+                        help='Used with --trader-file, if true then overwrites old trader.')
     
     parser.add_argument('-v', '--verbosity', type=int, dest='verbosity',
                         help="""0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
@@ -62,16 +69,31 @@ def main():
         return -1
     
     # Start run:
-    data = libutil.datasets.from_run(run_data, **args_dict)
+    dataset = libutil.datasets.from_run(run_data, **args_dict)
     model = libutil.models.from_run(run_data, **args_dict)
-    # trader = libutil.traders.from_run(run_data)
+    trader = libutil.traders.from_run(run_data, **args_dict)
     
     if not os.path.isdir("ckpt"):
         os.mkdir("ckpt")
     
-    model_file = f"ckpt/{model.get_filename()}" if args.model_file == None else args.model_file
+    model_file = load_thing(model, args.model_file, args.rebuild_model)
+    model.standard_train(dataset)
     
-    if not args.rebuild_model:
+    if not model.conf.epochs == 0:
+        print(f"> Saving model to {model_file}")
+        model.save(model_file)
+        
+    if trader is not None:
+        trader_file = load_thing(trader, args.trader_file, args.rebuild_trader)
+        trader.standard_train(model, dataset)
+    
+        print(f"> Saving trader to {trader_file}")
+        trader.save(trader_file)
+            
+def load_thing(model, model_file, rebuild_model):
+    model_file = f"ckpt/{model.get_filename()}" if model_file == None else model_file
+    
+    if not rebuild_model:
         if os.path.exists(model_file):
             print(f"> Loading model from {model_file}")
             model.load(model_file)
@@ -83,11 +105,7 @@ def main():
         else:
             print(f"> No model at {model_file}")
     
-    model.standard_train(data)
-    
-    print(f"> Saving model to {model_file}")
-    model.save(args.model_file)
-    
+    return model_file
     
 if __name__ == "__main__":
     main()

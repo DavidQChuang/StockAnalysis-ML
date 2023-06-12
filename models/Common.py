@@ -119,13 +119,27 @@ class StandardModel(ABC):
         print()
         
         return dataset
+    
+    def scale_input(self, input):
+        """
+        Scales an unscaled input x into the standard distribution this model was fitted to.
+            z = (x - u) / s
+        """
+        return (input - self.scaler.mean_[0]) / self.scaler.scale_[0]
+    
+    def scale_output(self, output):
+        """
+        Unscales a scaled output z into unscaled units.
+            x = z * s + u
+        """
+        return output * self.scaler.scale_[0] + self.scaler.mean_[0]
         
     @abstractmethod
     def standard_train(self, dataset):
         pass
     
     @abstractmethod
-    def infer(self, X, scale_inputs=False):
+    def infer(self, X, scale_inputs=False, scale_outputs=False):
         pass
     
     @abstractmethod
@@ -213,26 +227,19 @@ class PytorchModel(StandardModel):
             
             return y, loss
     
-    def infer(self, X, scale_inputs=False):
+    def infer(self, X, scale_inputs=False, scale_outputs=False):
         with torch.no_grad():
             if scale_inputs:
-                input = torch.tensor(X).cpu()
-                if len(input.shape) == 1:
-                    input = input[None, :]
-                
-                shape = input.shape
-                input = input.reshape((input.numel(), 1))
-                input = torch.tensor(self.scaler.transform(input.numpy())).to(self.device)
-                input = input.reshape(shape)
+                input = self.scale_input(X)
             else:
-                input = torch.tensor(X)
+                input = X
+                    
+            output = self.module.forward(input)
             
-            output = self.module.forward(input).cpu()
-            shape = output.shape
-            output = output.reshape((output.numel(), 1))
-            output = torch.tensor(self.scaler.inverse_transform(output.numpy())).to(self.device)
-            
-            return output.reshape(shape)
+            if scale_outputs:
+                output = self.scale_output(output)
+                
+            return output
     
     def standard_train(self, dataset: TimeSeriesDataset):
         if not isinstance(dataset, TimeSeriesDataset):
@@ -316,8 +323,6 @@ class PytorchModel(StandardModel):
                 err=math.sqrt(loss)*real_loss_scale
                 train_progress.set_postfix({
                     "loss": format_loss(loss), "loss($)": format_loss(err) }, refresh=False)
-                
-            del train_data
                 
             # Validate results
             module.eval()

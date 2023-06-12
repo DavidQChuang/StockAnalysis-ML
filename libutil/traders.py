@@ -1,17 +1,24 @@
-# from traders.AlphaVantage import AlphaVantageDataset
+from traders.Common import StandardTrader
+from traders.LSTMDQN import LSTMTrader
 
-def from_run(run_data):
-    if 'data_retriever' not in run_data:
-        raise "'data_retriever' cannot be None."
-    if 'data_retriever_name' not in run_data:
-        raise "'data_retriever_name' cannot be None."
+
+def from_run(run_data, device=None, use_deepspeed=False, **kwargs):
+    if 'trader' not in run_data:
+        raise "'trader' cannot be None."
+    if 'trader_name' not in run_data:
+        raise "'trader_name' cannot be None."
     
-    data_retriever = run_data.data_retriever
-    data_retriever_name = run_data.data_retriever_name
+    trader = run_data["trader"]
+    trader_name = run_data["trader_name"]
     
-    match data_retriever_name:
-        case 'alphavantage':
+    print(f"> Trader loader parameters:")
+    print(f"Using trader {trader_name}.")
+    print(f"Using device {device}.")
+    
+    match trader_name:
+        case 'none':
             return None
-            return AlphaVantageDataset(data_retriever)
+        case 'StandardTrader':
+            return StandardTrader(trader, device)
         case _:
             raise "Model not found."
