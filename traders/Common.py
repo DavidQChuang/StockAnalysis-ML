@@ -233,7 +233,10 @@ class StandardTrader:
         # corresponding to the prevoously taken action.
         # INPUT: state_batch:                   (b, o)
         #        policy_net(state_batch):       (b, a)
-        #        gather(1, action_batch):       (b, 1)                   
+        #        gather(1, action_batch):       (b, 1)                 
+        if action_batch.dtype != torch.int64:
+            print(action_batch)
+            raise Exception()  
         action_rewards = policy_net(state_batch).gather(1, action_batch)
 
         # -- Compute V(s_{t+1}) for all next states.
@@ -300,7 +303,8 @@ class StandardTrader:
         first_run = self.runtime == None
         if first_run:
             self.runtime = {
-                'episode': 0
+                'episode': 0,
+                'steps': 0
             }
             
         # -- Train multiple episodes
@@ -349,11 +353,12 @@ class StandardTrader:
                 curr_value = trade_sim.step(action, curr_price)
                 next_value = trade_sim.valuation(next_price) 
                 
-                # market_value = trade_sim.market_valuation(start_price, curr_price)
+                market_value = trade_sim.market_valuation(start_price, curr_price)
                 next_market_value = trade_sim.market_valuation(start_price, next_price)
                 
                 # Reward is delta liquid valuation
-                reward = (next_value - curr_value) # - (next_market_value - market_value)
+                #reward = (next_value - curr_value) # - (next_market_value - market_value)
+                reward = (next_value - next_market_value)
 
                 # -- Step state
                 # End simulation prematurely if we lost 10% of our money
@@ -382,8 +387,7 @@ class StandardTrader:
                 
                 train_progress.set_postfix({"val": f'${next_value:.2f}',
                                            "mkt_val":f'${next_market_value:.2f}',
-                                           "reward": f'${reward:.2f}',
-                                           "delta": f'${next_value-next_market_value:.2f}'},
+                                           "reward": f'${reward:.2f}'},
                                            refresh=False)
                 
                 if next_state is None:
@@ -395,6 +399,7 @@ class StandardTrader:
             print()
             
         print(f"Done in user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.\n")
+        self.runtime['steps'] = steps
         self.policy_net_state = policy_net.state_dict()
         self.target_net_state = target_net.state_dict()
         self.optimizer_state = optimizer.state_dict()
@@ -422,6 +427,7 @@ class StandardTrader:
         
         ckpt = {
             'episode': self.runtime["episode"],
+            'steps': self.runtime["steps"],
             'policy_net_state': self.policy_net_state,
             'target_net_state': self.target_net_state,
             'optimizer_state': self.optimizer_state
@@ -445,7 +451,8 @@ class StandardTrader:
         self.optimizer_state = ckpt['optimizer_state']
         
         self.runtime = {
-            'episode': ckpt['episode']
+            'episode': ckpt['episode'],
+            'steps': ckpt["steps"]
         }
         
         print(self.runtime)
