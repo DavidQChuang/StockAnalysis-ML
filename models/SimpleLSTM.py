@@ -26,9 +26,6 @@ class SimpleLSTM(nn.Module):
     def __init__(self, model_json):
         super().__init__()
         
-        if "gmlp" not in model_json:
-            raise Exception("'gmlp' key must be present in model.gmlp parameters.")
-        
         conf = ModelConfig.from_dict(model_json)
         
         input_size = conf.seq_len
