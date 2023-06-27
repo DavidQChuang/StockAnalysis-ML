@@ -7,3 +7,6 @@
 /runs/model_runs.json
 
 user-vars.sh
+/venv
+
+*.DS_Store
