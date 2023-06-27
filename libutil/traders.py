@@ -1,3 +1,4 @@
+import torch
 from traders.Common import StandardTrader
 from traders.LSTMDQN import LSTMTrader
 
@@ -7,6 +8,12 @@ def from_run(run_data, device=None, use_deepspeed=False, **kwargs):
         raise "'trader' cannot be None."
     if 'trader_name' not in run_data:
         raise "'trader_name' cannot be None."
+        
+    if device == None:
+        device = (
+            "cuda" if torch.cuda.is_available()
+            else "cpu"
+        )
     
     trader = run_data["trader"]
     trader_name = run_data["trader_name"]

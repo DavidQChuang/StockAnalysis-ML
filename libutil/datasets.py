@@ -1,4 +1,5 @@
-from datasets.AlphaVantage import AlphaVantageDataset
+from datasets.AlphaVantageDataset import AlphaVantageDataset
+from datasets.CsvDataset import CsvDataset
 from datasets.Common import TimeSeriesDataset
 
 def from_run(run_data, **kwargs) -> TimeSeriesDataset:
@@ -13,5 +14,7 @@ def from_run(run_data, **kwargs) -> TimeSeriesDataset:
     match dataset_name:
         case 'alphavantage':
             return AlphaVantageDataset(dataset_json)
+        case 'csv':
+            return CsvDataset(dataset_json)
         case _:
             raise "Model not found."
