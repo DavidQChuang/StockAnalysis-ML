@@ -1,0 +1,3 @@
+[submodule "stockapp"]
+	path = stockapp
+	url = ./stockapp/

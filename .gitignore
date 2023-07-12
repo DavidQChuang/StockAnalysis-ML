@@ -10,3 +10,4 @@ user-vars.sh
 /venv
 
 *.DS_Store
+webapp-state.txt
