@@ -151,7 +151,8 @@ class TradingSimulation:
         return self.valuation(current_price)
             
     def state(self):
-        return [ self.money, self.volume ]
+        return [ (self.money - self.starting_money) / 250,
+                1 if self.volume > 0 else 0 ]
     
     def action_count(self):
         return 4
@@ -179,7 +180,6 @@ class StandardTrader:
         device = self.device
         
         eps = conf.eps_end + (conf.eps_start - conf.eps_end) * math.exp(-1 * steps / conf.eps_decay)
-        steps += 1
         
         sample = random.random()
         if sample > eps:
@@ -233,18 +233,14 @@ class StandardTrader:
         # corresponding to the prevoously taken action.
         # INPUT: state_batch:                   (b, o)
         #        policy_net(state_batch):       (b, a)
-        #        gather(1, action_batch):       (b, 1)                 
-        if action_batch.dtype != torch.int64:
-            print(action_batch)
-            raise Exception()  
+        #        gather(1, action_batch):       (b, 1)
         action_rewards = policy_net(state_batch).gather(1, action_batch)
 
         # -- Compute V(s_{t+1}) for all next states.
-        # Expected values of actions for non_final_next_states are computed based
-        # on the "older" target_net; selecting their best reward with max(1)[0].
-        # This is merged based on the mask, such that we'll have either the expected
-        # state value or 0 in case the state was final.
-        next_state_values = torch.zeros((conf.batch_size,1)).to(device)
+        # Use "older" target_net to select the best reward with max(1)[0].
+        # This is only computed for non-final states.
+        # Final states are set to the last reward.
+        next_state_values = (torch.zeros((conf.batch_size,1)) - 250).to(device)
         with torch.no_grad():
             next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].unsqueeze(-1)
         # Compute the expected Q values
@@ -316,11 +312,12 @@ class StandardTrader:
         batch_count = math.ceil(len(scaled_dataset) / conf.batch_size)
         
         # Global action steps for epsilon decay
-        steps = 0
+        steps = self.runtime['steps']
+        lifetime_epochs = conf.episodes + self.runtime['episode']
         
         for e in range(conf.episodes):
-            # addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
-            print(f"Episode {e+1}/{conf.episodes}")
+            addl_desc = '' if first_run else f'; Total episodes: {self.runtime["episode"] + 1}/{lifetime_epochs}'
+            print(f"Episode {e+1}/{conf.episodes}{addl_desc}")
             if use_cuda:
                 print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
                 
@@ -344,6 +341,7 @@ class StandardTrader:
             for idx in train_progress:
                 # Step with action, then compute next valuation
                 action = self.single_train_action(policy_net, state, steps)
+                steps+=1
                 
                 datapoint = scaled_dataset[idx]
                 next_datapoint = scaled_dataset[idx + 1]
@@ -358,7 +356,11 @@ class StandardTrader:
                 
                 # Reward is delta liquid valuation
                 #reward = (next_value - curr_value) # - (next_market_value - market_value)
-                reward = (next_value - next_market_value)
+                advantage = next_value - next_market_value
+                net_gain = next_value - conf.starting_money
+                step_gain = next_value - curr_value
+                
+                reward = advantage + net_gain * 0.1 + - 300
 
                 # -- Step state
                 # End simulation prematurely if we lost 10% of our money
@@ -385,9 +387,12 @@ class StandardTrader:
                     target_net_state_dict[key] = policy_net_state_dict[key]*conf.tau + target_net_state_dict[key]*(1-conf.tau)
                 target_net.load_state_dict(target_net_state_dict)
                 
+                eps = conf.eps_end + (conf.eps_start - conf.eps_end) * math.exp(-1 * steps / conf.eps_decay)
                 train_progress.set_postfix({"val": f'${next_value:.2f}',
                                            "mkt_val":f'${next_market_value:.2f}',
-                                           "reward": f'${reward:.2f}'},
+                                           "reward": f'${reward:.2f}',
+                                           "delta": f'${advantage:.2f}',
+                                           'eps': eps},
                                            refresh=False)
                 
                 if next_state is None:
@@ -433,7 +438,8 @@ class StandardTrader:
             'optimizer_state': self.optimizer_state
         }
         print({
-            'episode': ckpt['episode']
+            'episode': ckpt['episode'],
+            'steps': ckpt["steps"],
             })
         print()
         

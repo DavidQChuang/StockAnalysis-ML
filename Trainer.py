@@ -10,6 +10,10 @@ import libutil.datasets
 import libutil.models
 import libutil.traders
 
+from datasets.Common import TimeSeriesDataset
+from models.Common import StandardModel
+from traders.Common import StandardTrader
+
 def main():
     parser = argparse.ArgumentParser(description='Args test')
     parser.add_argument('-r', '--run-name', type=str, dest='run_name',
@@ -44,39 +48,52 @@ def main():
 
     parser.add_argument('-ds', '--deepspeed', dest='use_deepspeed', action="store_true",
                         help='Enables deepspeed.')
+    
+    args = vars(parser.parse_args())
+    run_data = load_run(**args)
+    exec_run(run_data, **args)
 
-    # Parse args
-    args = parser.parse_args()
-    args_dict = vars(args)
-        
+def load_run(run_name=None, run_file="runs/model_runs.json", 
+             verbosity=None, **kwargs):
+    args = locals()
+    
     # Verbosity
-    verbosity = 1 if args.verbosity is None else args.verbosity
+    verbosity = 1 if verbosity is None else verbosity
     
     if verbosity < 0 or verbosity > 2:
         print("! Invalid verbosity level. Must be 0-2. ")
-        return -1
+        exit(-1)
     
     # Get a run from the run file
     try:
-        if args.run_name is None:
-            run_data = libutil.runs.from_input(**args_dict)
+        if run_name is None:
+            run_data = libutil.runs.from_input(**args)
         else:
-            run_data = libutil.runs.from_file(**args_dict)
+            run_data = libutil.runs.from_file(**args)
         
     except Exception:
         print("! Failed to parse run. Printing exception: ")
         traceback.print_exc()
-        return -1
+        exit(-1)
+        
+    return run_data
+
+def exec_run(run_data,
+            #  run_name=None, run_file="runs/model_runs.json", 
+             model_file=None, trader_file=None, rebuild_model=False, rebuild_trader=False,
+             verbosity=None,
+             device=None, use_deepspeed=False, **kwargs):
+    args = locals()
     
     # Start run:
-    dataset = libutil.datasets.from_run(run_data, **args_dict)
-    model = libutil.models.from_run(run_data, **args_dict)
-    trader = libutil.traders.from_run(run_data, **args_dict)
-    
+    dataset = libutil.datasets.from_run(**args)
+    model = libutil.models.from_run(**args)
+    trader = libutil.traders.from_run(**args)
+
     if not os.path.isdir("ckpt"):
         os.mkdir("ckpt")
     
-    model_file = load_thing(model, args.model_file, args.rebuild_model)
+    model_file = _load_thing(model, model_file, rebuild_model)
     model.standard_train(dataset)
     
     if not model.conf.epochs == 0:
@@ -84,13 +101,13 @@ def main():
         model.save(model_file)
         
     if trader is not None:
-        trader_file = load_thing(trader, args.trader_file, args.rebuild_trader)
+        trader_file = _load_thing(trader, trader_file, rebuild_trader)
         trader.standard_train(model, dataset)
     
         print(f"> Saving trader to {trader_file}")
         trader.save(trader_file)
             
-def load_thing(model, model_file, rebuild_model):
+def _load_thing(model, model_file, rebuild_model):
     model_file = f"ckpt/{model.get_filename()}" if model_file == None else model_file
     
     if not rebuild_model:

@@ -7,7 +7,8 @@ from subprocess import PIPE, STDOUT, Popen
 from websockets.server import serve, WebSocketServerProtocol
 import shutil
 
-from libutil.webapp import WebappState, load_state, event_set, event_run, send_error
+from libutil.webapp import get_success, get_error
+from libutil.webapp import WebappState, load_state, save_state, event_set, event_load, event_run
     
 async def run_test(ws):
     # NOTE: the `-u` is required for printing unbuffered (I believe) to stdout
@@ -23,18 +24,26 @@ STATE = load_state()
 
 async def echo(ws: WebSocketServerProtocol):
     async for message in ws:
-        # try:
-        #     event = json.loads(message)
-        #     event_type = event['type']
-        # except Exception as e:
-        #     await send_error(ws, f"Invalid JSON: {e}")
-        #     continue
-        event = message
-        event_type = message.split(' ')[0]
+        event = message.split(' ')
+        event_type = event[0]
 
         match event_type:
+            case 'state':
+                if len(event) == 1:
+                    response = json.dumps(vars(STATE))
+                elif len(event) == 2:
+                    if event[1] == 'save':
+                        try:
+                            save_state(STATE)
+                            response = get_success()
+                        except Exception as e:
+                            response = get_error(f"Failed to save state: {e}")
+            
             case 'set':
                 response = event_set(ws, event, STATE)
+                
+            case 'load':
+                response = event_load(ws, event, STATE)
             
             case 'run':
                 response = event_run(ws, event, STATE)
@@ -43,16 +52,14 @@ async def echo(ws: WebSocketServerProtocol):
                 response = message
                 
             case _:
-                response = False
-                await send_error(ws, "No event type provided.")
+                response = get_error("Invalid command.")
         
         if response != False:
             if not isinstance(response, str):
                 try:
                     response = json.dumps(response, separators=(",",":"))
                 except Exception as e:
-                    await send_error(ws, f"Internal error, response was malformed: {e}")
-                    continue
+                    response = get_error(f"Internal error, response was malformed: {e}")
                 
             await ws.send(response)
             

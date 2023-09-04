@@ -416,7 +416,7 @@ class DeepspeedModel(PytorchModel):
         self.model_engine = model_engine
         self.optimizer = optimizer
         
-    def get_optimizer(self, model):
+    def get_optimizer(self):
         return None
         
     def single_train(self, X, Y_HAT, loss_func, optimizer):
