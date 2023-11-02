@@ -167,8 +167,12 @@ class StandardModel(ABC):
         
         train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
         
-        train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
-        valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
+        if self.device != None and self.device != 'cpu':
+            train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
+            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
+        else:
+            train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
+            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
         
         return train_dataloader, valid_dataloader
         
