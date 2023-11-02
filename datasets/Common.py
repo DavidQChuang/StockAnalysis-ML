@@ -17,12 +17,32 @@ class DatasetConfig:
     # so the values of these don't matter and they don't need to be defined in 'dataset'.
     seq_len     : int = 24
     out_seq_len : int = 1
+    indicators  : list[str] = None
+    
+@dataclass
+class IndicatorConfig:
+    @classmethod
+    def from_dict(cls, env):      
+        return cls(**{
+            k: v for k, v in env.items() 
+            if k in inspect.signature(cls).parameters
+        })
+        
+    # Model I/O window sizes
+    # These values will be copied from the model JSON,
+    # so the values of these don't matter and they don't need to be defined in 'dataset'.
+    function     : str = 'SMA'
+    periods      : int = 20
     
 from torch.utils.data.dataset import Dataset
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, seq_len, out_seq_len):
-        self.conf = DatasetConfig(seq_len, out_seq_len)
+    def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, conf=None):
+        if conf == None:
+            self.conf = DatasetConfig(seq_len, out_seq_len)
+        else:
+            self.conf = conf
+            
         self.df: pd.DataFrame = df
         self.series_close: pd.Series = self.df['close']
 

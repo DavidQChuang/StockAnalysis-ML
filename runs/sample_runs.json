@@ -69,20 +69,33 @@
                 "alphavantage": {
                     "symbol": "TQQQ",
 
-                    "function": "TIME_SERIES_INTRADAY_EXTENDED",
+                    "function": "TIME_SERIES_INTRADAY",
                     "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
                                 "year1month5", "year1month6", "year1month7", "year1month8" ],
                     "interval": "5min",
                     "outputsize": "full"
-                }
+                },
+                "indicators": [
+                    {
+                        "function": "EMA",
+                        "periods": 20
+                    }
+                ]
             },
 
             "model_name": "SimpleLSTM",
             "model": {
+                "epochs": 0,
                 "seq_len": 72,
                 "out_seq_len": 1,
             
                 "hidden_layer_size": 256
+            },
+
+            "trader_name": "StandardTrader",
+            "trader": {
+                "episodes": 256,
+                "hidden_layer_size": 2048
             }
         },
         "Intra-Ext-LSTM-TQQQ": {

@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from .Common import DatasetConfig, TimeSeriesDataset
+from .Common import DatasetConfig, IndicatorConfig, TimeSeriesDataset
 
 import os
 import re
@@ -9,10 +9,10 @@ from urllib.parse import urlencode
 
 class AlphaVantageDataset(TimeSeriesDataset):
     def __init__(self, dataset_json):
-        conf = DatasetConfig.from_dict(dataset_json)
+        self.conf = DatasetConfig.from_dict(dataset_json)
         df = self.get_dataframe(dataset_json)
         
-        super().__init__(df, conf.seq_len, conf.out_seq_len)
+        super().__init__(df, conf=self.conf)
     
     def get_dataframe(self, dataset_json, forceOverwrite=False):
         url = "https://www.alphavantage.co/query?"
@@ -49,7 +49,49 @@ class AlphaVantageDataset(TimeSeriesDataset):
             df = self.download_csv(new_url, self.get_filename(query_params, slice), forceOverwrite)
             dfs.append(df)
             
-        return pd.concat(dfs)
+        df = pd.concat(dfs, ignore_index=True)
+        
+        # Calculate indicators
+        start_index = 0
+        if self.conf.indicators != None:
+            print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
+            for indicator in self.conf.indicators:
+                ind_conf = IndicatorConfig.from_dict(indicator)
+                ind_values = [0] * ind_conf.periods
+                
+                start_index = max(start_index, ind_conf.periods)
+                close_values = df['close']
+                
+                match ind_conf.function:
+                    case 'SMA':
+                        for i in tqdm(range(ind_conf.periods, len(close_values.index)), ncols=80):
+                            sma = df['close'][i-ind_conf.periods:i].sum() / ind_conf.periods
+                            ind_values.append(sma)
+                        
+                    case 'EMA':
+                        mult = 2/(1+ind_conf.periods)
+                        sma = close_values[0:ind_conf.periods].sum() / ind_conf.periods
+                        ind_values.append(sma)
+                        
+                        print(close_values)
+                        print(close_values.shape)
+                        print(close_values.index)
+                        print("Processing " + str(close_values.size) + " values")
+                        for i in tqdm(range(ind_conf.periods+1, len(close_values.index)), ncols=80):
+                            ind_values.append(close_values[i]*mult + ind_values[-1]*(1-mult))
+                            
+                    case _:
+                        raise Exception("Invalid indicator name: " + ind_conf.function)
+                        
+                            
+                df['close_' + ind_conf.function.lower()] = ind_values
+        
+        # Remove values without indicators
+        df = df.iloc[start_index:, :]
+        
+        print(df.iloc[0:10, :])
+        
+        return df
     
     def get_filename(self, query_params, slice):
         def get_param(param):
@@ -101,6 +143,8 @@ class AlphaVantageDataset(TimeSeriesDataset):
                     
                 if not os.path.isdir(dir_name):
                     os.mkdir(dir_name)
+                    
+                # Standardize column names 
                 
                 if 'time' in df.columns:
                     df.rename(columns = {'time':'timestamp'}, inplace = True)
