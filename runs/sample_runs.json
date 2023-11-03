@@ -78,14 +78,19 @@
                 "indicators": [
                     {
                         "function": "EMA",
-                        "periods": 20
+                        "period": 20
+                    },
+                    {
+                        "function": "MACD",
+                        "period": 26,
+                        "period2": 12
                     }
                 ]
             },
 
             "model_name": "SimpleLSTM",
             "model": {
-                "epochs": 0,
+                "epochs": 8,
                 "seq_len": 72,
                 "out_seq_len": 1,
             

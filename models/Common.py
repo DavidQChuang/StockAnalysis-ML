@@ -108,12 +108,15 @@ class StandardModel(ABC):
         print('Fitting dataset.')
         print('Before: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
         
+        columns_to_scale = (
+            ['close']
+          + [ col for col in dataset.df.columns.values 
+                if col.startswith("close_")])
+        
         if fit:
-            dataset.df['close'] = self.scaler.fit_transform(dataset.df[['close']])
-            dataset.series_close = dataset.df['close']
-        else:
-            dataset.df['close'] = self.scaler.transform(dataset.df[['close']])
-            dataset.series_close = dataset.df['close']
+            dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale])
+        else: 
+            dataset.df[columns_to_scale] = self.scaler.transform(dataset.df[columns_to_scale])
         
         print('After: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
         print()

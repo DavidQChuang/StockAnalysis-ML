@@ -20,9 +20,9 @@ class GatedMLPConfig:
             if k in inspect.signature(cls).parameters
         })
         
-    layer_count: int = 6
-    layer_dropout: float = 0
-    embedding_length: int = 32
+    layer_count: int = 12
+    layer_dropout: float = 0.2
+    embedding_length: int = 64
     attention_size: int = 64
     
 class QKVAttention(nn.Module):
@@ -140,18 +140,19 @@ class GatedMLPBlock(nn.Module):
     
     
 class DropoutLayers(nn.Module):
-    def __init__(self, module_list, dropout_rate):
-        if isinstance(module_list, list):
-            module_list = nn.ModuleList(module_list)
+    def __init__(self, layers, dropout_rate):
+        super().__init__()
+        if isinstance(layers, list):
+            layers = nn.ModuleList(layers)
         
-        self.layers = module_list
-        self.layer_count = len(module_list)
+        self.layers = layers
+        self.layer_count = len(layers)
         self.dropout_rate = dropout_rate
         
     def forward(self, x):
         if self.training:
             keep_idxs = torch.zeros(self.layer_count).uniform_(0, 1) > self.dropout_rate
-            for i, layer in enumerate(self.module_list):
+            for i, layer in enumerate(self.layers):
                 if keep_idxs[i]:
                     x = layer(x)
             
@@ -185,7 +186,7 @@ class GatedMLP(nn.Module):
         self.register_buffer("position_embed", position_embed, True)
         
         # Layers
-        self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers)
+        self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
         self.unembed = nn.Linear(d_model, output_size)
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
         self.unproj = nn.Linear(seq_len*d_ffn, output_size)

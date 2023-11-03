@@ -1,4 +1,6 @@
 from tqdm import tqdm
+
+from datasets.indicators import get_series_ema, get_series_macd, get_series_sma
 from .Common import DatasetConfig, IndicatorConfig, TimeSeriesDataset
 
 import os
@@ -57,39 +59,39 @@ class AlphaVantageDataset(TimeSeriesDataset):
             print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
             for indicator in self.conf.indicators:
                 ind_conf = IndicatorConfig.from_dict(indicator)
-                ind_values = [0] * ind_conf.periods
+                ind_values = [0] * ind_conf.period
                 
-                start_index = max(start_index, ind_conf.periods)
+                # How many values to remove from the start of the arraydue to insufficient data points
+                start_index = max(start_index, ind_conf.period)
                 close_values = df['close']
+                # Whether or not this columns should be scaled with 'close' or left unscaled.
+                scale_with_close = True
                 
                 match ind_conf.function:
                     case 'SMA':
-                        for i in tqdm(range(ind_conf.periods, len(close_values.index)), ncols=80):
-                            sma = df['close'][i-ind_conf.periods:i].sum() / ind_conf.periods
-                            ind_values.append(sma)
+                        ind_values = get_series_sma(ind_conf.period, close_values)
                         
                     case 'EMA':
-                        mult = 2/(1+ind_conf.periods)
-                        sma = close_values[0:ind_conf.periods].sum() / ind_conf.periods
-                        ind_values.append(sma)
+                        ind_values = get_series_ema(ind_conf.period, close_values)
                         
-                        print(close_values)
-                        print(close_values.shape)
-                        print(close_values.index)
-                        print("Processing " + str(close_values.size) + " values")
-                        for i in tqdm(range(ind_conf.periods+1, len(close_values.index)), ncols=80):
-                            ind_values.append(close_values[i]*mult + ind_values[-1]*(1-mult))
+                    case 'MACD':
+                        ind_values = get_series_macd(ind_conf.period, ind_conf.period2, close_values)
+                        scale_with_close = False
                             
                     case _:
                         raise Exception("Invalid indicator name: " + ind_conf.function)
-                        
-                            
-                df['close_' + ind_conf.function.lower()] = ind_values
+                
+                col_name = 'close_' + ind_conf.function.lower() + str(ind_conf.period)
+                if not scale_with_close:
+                    col_name = 'unscaled_' + col_name
+
+                df[col_name] = ind_values
         
         # Remove values without indicators
         df = df.iloc[start_index:, :]
         
-        print(df.iloc[0:10, :])
+        print(df.iloc[0:5, :])
+        print()
         
         return df
     

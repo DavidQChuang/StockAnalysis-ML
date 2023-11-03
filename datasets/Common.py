@@ -32,7 +32,8 @@ class IndicatorConfig:
     # These values will be copied from the model JSON,
     # so the values of these don't matter and they don't need to be defined in 'dataset'.
     function     : str = 'SMA'
-    periods      : int = 20
+    period      : int = 20
+    period2     : int = 12
     
 from torch.utils.data.dataset import Dataset
 
