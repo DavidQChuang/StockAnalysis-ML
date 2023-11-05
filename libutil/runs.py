@@ -2,6 +2,8 @@ import json
 import os
 import sys
 
+import datasets.indicators as indicators
+
 def except_nokey(dict, key, desc):
     if key not in dict:
         raise Exception(f"'{key}' key must be present in {desc}.")
@@ -100,9 +102,32 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
         # Copy model.seq_len and model.out_seq_len into dataset._
         except_nokey(run_data, 'model', 'run')
         except_nokey(run_data, 'dataset', 'run')
-        
+        except_nokey(run_data["model"], 'seq_len', 'run.model')
+        except_nokey(run_data["model"], 'out_seq_len', 'run.model')
         run_data["dataset"]['seq_len'] = run_data["model"]["seq_len"]
         run_data["dataset"]['out_seq_len'] = run_data["model"]["out_seq_len"]
+        
+        # Copy dataset.columns into model.columns
+        if 'columns' not in run_data['dataset']:
+            run_data["dataset"]['columns'] = [{ "name": 'close', "is_scaled": True}]
+        run_data["model"]['columns'] = run_data["dataset"]['columns']
+            
+        # Create dataset.columns from dataset.indicators
+        if 'indicators' in run_data['dataset']:
+            run_data['model']['indicators'] = run_data['dataset']['indicators']
+            
+            for indicator in run_data['dataset']['indicators']:
+                if 'is_input' in indicator and indicator['is_input']:
+                    if 'name' not in indicator:
+                        indicator['name'] = indicators.get_indicator_name_json(indicator)
+                    ind_name = indicator['name']
+                    
+                    # model.columns updates with dataset.columns
+                    run_data['dataset']['columns'].append({
+                        "name": ind_name,
+                        "from_indicator": True,
+                        "is_scaled": 'is_scaled' in indicator and indicator['is_scaled']
+                    })
         
         print(f"> Running {run_name}")
         print()

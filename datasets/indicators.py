@@ -1,6 +1,12 @@
 import pandas as pd
 from tqdm import tqdm
 
+def get_indicator_name_json(ind_json):
+    return 'close_' + ind_json['function'].lower() + str(ind_json['period'])
+
+def get_indicator_name(function, period):
+    return 'close_' + function + str(period)
+
 def init_indicator(period, series):
     series_size = len(series)
     ind_values = [None]*period

@@ -20,6 +20,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 
+from traders.LinearDQN import LinearDQN
+
 @dataclass
 class TraderConfig:
     @classmethod
@@ -51,9 +53,8 @@ class TraderConfig:
             self.hidden_layer_size)
     
 class TradingDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, inference_model: StandardModel):
+    def __init__(self, df: pd.DataFrame, inference_model: StandardModel, dataset_config: DatasetConfig):
         self.df = df
-        self.series_close: pd.Series = self.df['close']
         
         real_len = inference_model.conf.seq_len
         infer_len = inference_model.conf.out_seq_len
@@ -68,7 +69,8 @@ class TradingDataset(Dataset):
         batch_size = 64
         # Output window for the TSDataset is 0
         # since we won't need to cut datapoints from the end to use in loss functions.
-        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0), batch_size)
+        config = DatasetConfig(real_len, 0, dataset_config.indicators, dataset_config.columns)
+        batch_data = DataLoader(TimeSeriesDataset(df, conf=config), batch_size)
         
         bar_format = get_bar_format(len(batch_data), 1)
         
@@ -86,7 +88,7 @@ class TradingDataset(Dataset):
         return len(self.df) - self.real_len + 1
     
     def __getitem__(self, index):
-        real_values = self.series_close[index: index + self.real_len]
+        real_values = self.df['close'][index: index + self.real_len]
         return { "real": real_values.values, "inference": self.inferences[index] }
     
             
@@ -106,20 +108,6 @@ class ReplayMemory:
 
     def __len__(self):
         return len(self.memory)
-        
-class DQN(nn.Module):
-    def __init__(self, n_observations, n_actions, hl_size):
-        super(DQN, self).__init__()
-        self.layer1 = nn.Linear(n_observations, hl_size)
-        self.layer2 = nn.Linear(hl_size, hl_size)
-        self.layer3 = nn.Linear(hl_size, n_actions)
-
-    # Called with either one element to determine next action, or a batch
-    # during optimization. Returns tensor([[left0exp,right0exp]...]).
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
-        return self.layer3(x)
     
 class TradingSimulation:
     def __init__(self, money) -> None:
@@ -134,6 +122,10 @@ class TradingSimulation:
         return self.starting_money / starting_price * current_price
         
     def step(self, action, current_price):
+        """Performs the given action (0b01 to sell, 0b10 to buy, 0b11 for both, 0b00 for none)
+        then returns the previous valuation.
+        """
+        prev_value = self.valuation(current_price)
         # sell
         if action & 1 != 0:
             shares = self.volume
@@ -148,7 +140,7 @@ class TradingSimulation:
             self.money -= current_price * shares
             self.volume += shares
             
-        return self.valuation(current_price)
+        return prev_value
             
     def state(self):
         return [ self.money, self.volume ]
@@ -262,6 +254,18 @@ class StandardTrader:
         optimizer.step()
         
     def get_state(self, trade_sim, datapoint, device):
+        """Returns the current state of the DQN.
+        Concatenates real datapoints first, then inferred future datapoints,
+        then account value.
+
+        Args:
+            trade_sim (_type_): _description_
+            datapoint (_type_): _description_
+            device (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         price_state = torch.Tensor(datapoint["real"]).to(device)
         infer_state = torch.Tensor(datapoint["inference"]).to(device)
         account_state = torch.Tensor(trade_sim.state()).to(device)
@@ -280,7 +284,7 @@ class StandardTrader:
         
         trade_sim = TradingSimulation(conf.starting_money)
         scaled_dataset = model.scale_dataset(dataset, fit=True)
-        scaled_dataset = TradingDataset(scaled_dataset.df, model)
+        scaled_dataset = TradingDataset(scaled_dataset.df, model, dataset.conf)
         
         # Set up DQN
         # Inputs: stock prices up to current time, future predicted prices, and current account state
@@ -288,8 +292,8 @@ class StandardTrader:
         # Outputs: nothing, buy, sell
         n_actions = trade_sim.action_count()
         
-        policy_net = torch.compile(DQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
-        target_net = torch.compile(DQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
+        policy_net = torch.compile(LinearDQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
+        target_net = torch.compile(LinearDQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
         
         if self.policy_net_state != None:
             policy_net.load_state_dict(self.policy_net_state)
@@ -341,6 +345,10 @@ class StandardTrader:
             
             # -- Run the simulation
             train_progress = tqdm(idx_range, bar_format=bar_format)
+            avg_profit = 0
+            avg_delta = 0
+            avg_mkt_profit = 0
+            avg_mkt_delta = 0
             for idx in train_progress:
                 # Step with action, then compute next valuation
                 action = self.single_train_action(policy_net, state, steps)
@@ -348,17 +356,29 @@ class StandardTrader:
                 datapoint = scaled_dataset[idx]
                 next_datapoint = scaled_dataset[idx + 1]
                 
+                # Stock pricing
                 curr_price = model.scale_output(datapoint["real"][-1])
                 next_price = model.scale_output(next_datapoint["real"][-1])
+                # Value of the simulated stock account
                 curr_value = trade_sim.step(action, curr_price)
                 next_value = trade_sim.valuation(next_price) 
                 
+                # Value of the market (if you had invested the starting money and kept it in the market the whole time)
                 market_value = trade_sim.market_valuation(start_price, curr_price)
                 next_market_value = trade_sim.market_valuation(start_price, next_price)
                 
                 # Reward is delta liquid valuation
                 #reward = (next_value - curr_value) # - (next_market_value - market_value)
-                reward = (next_value - next_market_value)
+                profit = (next_value - conf.starting_money)
+                delta = (next_value - curr_value)
+                mkt_profit = (next_market_value - conf.starting_money)
+                mkt_delta = (next_market_value - market_value)
+                reward = (next_value - next_market_value) + profit
+
+                avg_profit += profit
+                avg_delta += delta
+                avg_mkt_profit += mkt_profit
+                avg_mkt_delta += mkt_delta
 
                 # -- Step state
                 # End simulation prematurely if we lost 10% of our money
@@ -385,16 +405,22 @@ class StandardTrader:
                     target_net_state_dict[key] = policy_net_state_dict[key]*conf.tau + target_net_state_dict[key]*(1-conf.tau)
                 target_net.load_state_dict(target_net_state_dict)
                 
-                train_progress.set_postfix({"val": f'${next_value:.2f}',
-                                           "mkt_val":f'${next_market_value:.2f}',
-                                           "reward": f'${reward:.2f}'},
-                                           refresh=False)
-                
                 if next_state is None:
                     break
+                else:
+                    train_progress.set_postfix({"val": f'${next_value:.2f}',
+                                            "mkt_val":f'${next_market_value:.2f}',
+                                            "reward": f'${reward:.2f}',
+                                            "delta": f'${next_value-curr_value:.2f}',
+                                            "profit": f'${next_value-conf.starting_money:.2f}'},
+                                            refresh=False)
 
             self.runtime['episode'] += 1
             
+            iters = len(idx_range)
+            print(f"avg_mkt_profit: {avg_mkt_profit/iters:.2f}$; avg_mkt_delta: {avg_mkt_delta/iters:.2f}$")
+            print(f"avg_profit: {avg_profit/iters:.2f}$; avg_delta: {avg_delta/iters:.2f}$")
+            print(f"avg_profit diff: {(avg_profit-avg_mkt_profit)/iters:.2f}$; avg_delta diff: {(avg_delta - avg_mkt_delta)/iters:.2f}$")
             print(f"user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.")
             print()
             

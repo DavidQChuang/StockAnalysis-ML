@@ -1,6 +1,5 @@
 from tqdm import tqdm
 
-from datasets.indicators import get_series_ema, get_series_macd, get_series_sma
 from .Common import DatasetConfig, IndicatorConfig, TimeSeriesDataset
 
 import os
@@ -11,10 +10,10 @@ from urllib.parse import urlencode
 
 class AlphaVantageDataset(TimeSeriesDataset):
     def __init__(self, dataset_json):
-        self.conf = DatasetConfig.from_dict(dataset_json)
         df = self.get_dataframe(dataset_json)
         
-        super().__init__(df, conf=self.conf)
+        super().__init__(df, conf=DatasetConfig.from_dict(dataset_json))
+        
     
     def get_dataframe(self, dataset_json, forceOverwrite=False):
         url = "https://www.alphavantage.co/query?"
@@ -52,47 +51,6 @@ class AlphaVantageDataset(TimeSeriesDataset):
             dfs.append(df)
             
         df = pd.concat(dfs, ignore_index=True)
-        
-        # Calculate indicators
-        start_index = 0
-        if self.conf.indicators != None:
-            print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
-            for indicator in self.conf.indicators:
-                ind_conf = IndicatorConfig.from_dict(indicator)
-                ind_values = [0] * ind_conf.period
-                
-                # How many values to remove from the start of the arraydue to insufficient data points
-                start_index = max(start_index, ind_conf.period)
-                close_values = df['close']
-                # Whether or not this columns should be scaled with 'close' or left unscaled.
-                scale_with_close = True
-                
-                match ind_conf.function:
-                    case 'SMA':
-                        ind_values = get_series_sma(ind_conf.period, close_values)
-                        
-                    case 'EMA':
-                        ind_values = get_series_ema(ind_conf.period, close_values)
-                        
-                    case 'MACD':
-                        ind_values = get_series_macd(ind_conf.period, ind_conf.period2, close_values)
-                        scale_with_close = False
-                            
-                    case _:
-                        raise Exception("Invalid indicator name: " + ind_conf.function)
-                
-                col_name = 'close_' + ind_conf.function.lower() + str(ind_conf.period)
-                if not scale_with_close:
-                    col_name = 'unscaled_' + col_name
-
-                df[col_name] = ind_values
-        
-        # Remove values without indicators
-        df = df.iloc[start_index:, :]
-        
-        print(df.iloc[0:5, :])
-        print()
-        
         return df
     
     def get_filename(self, query_params, slice):

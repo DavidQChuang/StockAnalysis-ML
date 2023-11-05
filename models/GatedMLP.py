@@ -168,7 +168,7 @@ class GatedMLP(nn.Module):
         gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
         conf = ModelConfig.from_dict(model_json)
         
-        feature_count = 1
+        feature_count = len(conf.columns)
         embedding_length = gmlp.embedding_length
         seq_len = conf.seq_len
         output_size = conf.out_seq_len
@@ -193,7 +193,6 @@ class GatedMLP(nn.Module):
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
-        
         # Make sure x is shape (batch_size, seq_len, features)
         # This unsqueezes x from (b, n) to (b, n, 1)
         if len(x.shape) == 1:
@@ -201,20 +200,26 @@ class GatedMLP(nn.Module):
         if len(x.shape) == 2:
             x = x.unsqueeze(2)
         
-        input_offset = x[:, 0]
+        # Assume 'close' is the 1st column
+        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
-        # INPUT: x[:, 0][:, None]:      (b, 1)
-        x = x - input_offset[:, None]
+        # INPUT: input_offset:          (b, 1)
+        x[:, :, 0] = x[:, :, 0] - input_offset
         
         # -- Positional encoding
         # INPUT: x:                     (b, n, f)
         # INPUT: positional_encoding:   (n, d)
-        #        pos_enc[None, :]:      (1, n, d)
-        #        x = x * pos_enc:       (b, n, f, d)
+        #        x.split(1, -1):        list[f]: (b, n, d)
+        #        xs[i] * pos_enc:       (b, n, d)
+        #        x = torch.stack(xs):   (b, n, f, d)
         #        x = x.reshape():       (b, n, f*d)
-        x = x * self.position_embed[None, :]
+        # Split by feature and add positional encoding to each feature datapoint
+        xs = list(x.split(1, -1))
+        for i in range(0, x.shape[-1]):
+            xs[i] = xs[i] * self.position_embed
+        x = torch.stack(xs, -1)
         x = x.reshape(x.shape[0:2]+(-1,))
         
         # -- FFN
@@ -236,7 +241,6 @@ class GatedMLP(nn.Module):
         # INPUT: x:                     (b, o)
         # INPUT: input_offset:          (b, 1)
         x = x + input_offset
-        
         return x
         
     def get_position_encoding(self, seq_len, d, n=10000):

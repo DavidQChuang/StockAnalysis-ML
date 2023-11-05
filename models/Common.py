@@ -80,10 +80,13 @@ class ModelConfig:
     
     precompile          : bool = False
     
+    indicators          : list[dict] = None
+    columns             : list[dict] = None
+    
     @property
     def model_filename(self):
-        return "%d_%d+%d" % (
-            self.hidden_layer_size, self.seq_len, self.out_seq_len)
+        return "%d_%d+%df%d" % (
+            self.hidden_layer_size, self.seq_len, self.out_seq_len, len(self.columns))
 
 class StandardModel(ABC):
     def __init__(self, model_json, device=None, verbosity=1):
@@ -106,19 +109,16 @@ class StandardModel(ABC):
         
     def scale_dataset(self, dataset: TimeSeriesDataset, fit=False):
         print('Fitting dataset.')
-        print('Before: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
+        print('Before: ', dataset.df[dataset.column_names][:3].to_numpy(), 'dtype=', dataset.df['close'].dtype)
         
-        columns_to_scale = (
-            ['close']
-          + [ col for col in dataset.df.columns.values 
-                if col.startswith("close_")])
+        columns_to_scale = [ col['name'] for col in dataset.columns if 'is_scaled' in col and col['is_scaled']]
         
         if fit:
             dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale])
         else: 
             dataset.df[columns_to_scale] = self.scaler.transform(dataset.df[columns_to_scale])
         
-        print('After: ', dataset.series_close[:3].to_numpy(), 'dtype=', dataset.series_close.dtype)
+        print('After: ', dataset.df[dataset.column_names][:3].to_numpy(), 'dtype=', dataset.df['close'].dtype)
         print()
         
         return dataset

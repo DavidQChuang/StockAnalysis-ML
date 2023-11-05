@@ -78,13 +78,20 @@
                 "indicators": [
                     {
                         "function": "EMA",
-                        "period": 20
+                        "period": 20,
+                        "is_input": true,
+                        "is_scaled": true
                     },
                     {
                         "function": "MACD",
                         "period": 26,
-                        "period2": 12
+                        "period2": 12,
+                        "is_input": true,
+                        "is_scaled": false
                     }
+                ],
+                "columns": [
+                    { "name": "close", "is_scaled": true }
                 ]
             },
 
@@ -120,9 +127,11 @@
             "copy_run": "Intra-LSTM-TQQQ",
             "model_name": "GatedMLP",
             "model": {
+                "epochs": 12,
+                "hidden_layer_size": 128,
                 "gmlp": {
                     "encoding_length": 128,
-                    "layer_count": 12
+                    "layer_count": 8
                 }
             }
         },
@@ -130,10 +139,11 @@
             "copy_run": "Intra-Ext-LSTM-TQQQ",
             "model_name": "GatedMLP",
             "model": {
-                "epochs": 4,
+                "epochs": 12,
+                "hidden_layer_size": 128,
                 "gmlp": {
                     "encoding_length": 128,
-                    "layer_count": 12
+                    "layer_count": 8
                 }
             }
         }
