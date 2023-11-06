@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from .Common import DatasetConfig, TimeSeriesDataset
+from .Common import DatasetConfig, AdvancedTimeSeriesDataset
 
 import os
 import re
@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import date
 from urllib.parse import urlencode
 
-class CsvDataset(TimeSeriesDataset):
+class CsvDataset(AdvancedTimeSeriesDataset):
     def __init__(self, dataset_json):
         conf = DatasetConfig.from_dict(dataset_json)
         
@@ -20,4 +20,4 @@ class CsvDataset(TimeSeriesDataset):
             raise Exception(f"CSV file `{file_path}` does not exist.")
         
         df = pd.read_csv(file_path)
-        super().__init__(df, conf.seq_len, conf.out_seq_len)
+        super().__init__(df, conf)

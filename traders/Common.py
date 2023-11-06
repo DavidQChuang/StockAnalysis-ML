@@ -53,7 +53,7 @@ class TraderConfig:
             self.hidden_layer_size)
     
 class TradingDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, inference_model: StandardModel, dataset_config: DatasetConfig):
+    def __init__(self, df: pd.DataFrame, inference_model: StandardModel):
         self.df = df
         
         real_len = inference_model.conf.seq_len
@@ -69,8 +69,7 @@ class TradingDataset(Dataset):
         batch_size = 64
         # Output window for the TSDataset is 0
         # since we won't need to cut datapoints from the end to use in loss functions.
-        config = DatasetConfig(real_len, 0, dataset_config.indicators, dataset_config.columns)
-        batch_data = DataLoader(TimeSeriesDataset(df, conf=config), batch_size)
+        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0), batch_size)
         
         bar_format = get_bar_format(len(batch_data), 1)
         
@@ -274,7 +273,7 @@ class StandardTrader:
     def standard_train(self, model: StandardModel, dataset: TimeSeriesDataset):
         conf = self.conf
         device = torch.device(self.device)
-        use_cuda = self.device == "cuda"
+        use_cuda = self.device != None and self.device != 'cpu'
         
         # Log trader setup
         print(f'> Trader config:')
@@ -284,7 +283,7 @@ class StandardTrader:
         
         trade_sim = TradingSimulation(conf.starting_money)
         scaled_dataset = model.scale_dataset(dataset, fit=True)
-        scaled_dataset = TradingDataset(scaled_dataset.df, model, dataset.conf)
+        scaled_dataset = TradingDataset(scaled_dataset.df, model)
         
         # Set up DQN
         # Inputs: stock prices up to current time, future predicted prices, and current account state

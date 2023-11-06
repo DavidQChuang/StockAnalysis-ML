@@ -44,9 +44,40 @@ class IndicatorConfig:
 from torch.utils.data.dataset import Dataset
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, conf=None):
+    def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, column_names=None):
+        self.df: pd.DataFrame = df
+        self._seq_len = seq_len
+        self._out_seq_len = out_seq_len
+        self._column_names = column_names
+        
+        if self.column_names == None or len(self.column_names) == 0:
+            raise Exception("Dataset was given no column names to use as input.")
+        
+    @property
+    def seq_len(self):
+        return self._seq_len
+    
+    @property
+    def out_seq_len(self):
+        return self._out_seq_len
+    
+    @property
+    def column_names(self):
+        return self._column_names
+        
+    def __len__(self):
+        return len(self.df) - self.seq_len - self.out_seq_len + 1
+    
+    def __getitem__(self, index):
+        input = self.df[self.column_names][index: index + self.seq_len]
+        output = self.df['close'][index + self.seq_len: index + self.seq_len + self.out_seq_len]
+        
+        return { 'X': input.values, 'y': output.values }
+
+class AdvancedTimeSeriesDataset(TimeSeriesDataset):
+    def __init__(self, df: pd.DataFrame, conf=None):
         if conf == None:
-            self.conf = DatasetConfig(seq_len, out_seq_len)
+            self.conf = DatasetConfig()
         else:
             self.conf = conf
         
@@ -79,10 +110,6 @@ class TimeSeriesDataset(Dataset):
                     ind_conf.name = indicators.get_indicator_name(ind_conf.function, ind_conf.period)
 
                 df[ind_conf.name] = ind_values
-                
-        if self.conf.columns == None:
-            print(self.conf)
-            raise ValueError("There are no columns in this dataset.")
         
         # Remove values without indicators
         if start_index != 0:
@@ -93,6 +120,7 @@ class TimeSeriesDataset(Dataset):
             print()
             
         self.df: pd.DataFrame = df
+        super().__init__(self.df, self.conf.seq_len, self.conf.out_seq_len, self.column_names)
 
     @property
     def indicators(self):
@@ -105,12 +133,3 @@ class TimeSeriesDataset(Dataset):
     @property
     def column_names(self):
         return [ col['name'] for col in self.conf.columns ]
-
-    def __len__(self):
-        return len(self.df) - self.conf.seq_len - self.conf.out_seq_len + 1
-    
-    def __getitem__(self, index):
-        input = self.df[self.column_names][index: index + self.conf.seq_len]
-        output = self.df['close'][index + self.conf.seq_len: index + self.conf.seq_len + self.conf.out_seq_len]
-        
-        return { 'X': input.values, 'y': output.values }

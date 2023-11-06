@@ -1,6 +1,6 @@
 from tqdm import tqdm
 
-from .Common import DatasetConfig, IndicatorConfig, TimeSeriesDataset
+from .Common import DatasetConfig, IndicatorConfig, AdvancedTimeSeriesDataset
 
 import os
 import re
@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import date
 from urllib.parse import urlencode
 
-class AlphaVantageDataset(TimeSeriesDataset):
+class AlphaVantageDataset(AdvancedTimeSeriesDataset):
     def __init__(self, dataset_json):
         df = self.get_dataframe(dataset_json)
         
