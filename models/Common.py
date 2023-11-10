@@ -84,6 +84,10 @@ class ModelConfig:
     columns             : list[dict] = None
     
     @property
+    def column_names(self):
+        return [ col['name'] for col in self.columns ]
+    
+    @property
     def model_filename(self):
         return "%d_%d+%df%d" % (
             self.hidden_layer_size, self.seq_len, self.out_seq_len, len(self.columns))
@@ -196,7 +200,8 @@ class PytorchModel(StandardModel):
             self.module = self.module.float().cpu()
             
         if self.conf.precompile:
-            self.module = torch.compile(self.module)
+            self.module = torch.compile(self.module, fullgraph=True, mode="reduce-overhead")
+            print("Optimizing model.")
         
         self.optimizer_state = None
         
@@ -222,8 +227,9 @@ class PytorchModel(StandardModel):
         y    : torch.Tensor = self.module(X)
         loss : torch.Tensor = loss_func.forward(y, Y_HAT)
         
-        loss.backward()
-        optimizer.step()
+        if not math.isnan(loss.item()):
+            loss.backward()
+            optimizer.step()
         
         return y, loss
             
@@ -322,6 +328,39 @@ class PytorchModel(StandardModel):
                 # print statistics
                 train_loss += loss.item()
                 if math.isnan(train_loss):
+                    print(">>> IN/OUT: ")
+                    print(X, Y_HAT)
+                    print()
+                    print()
+                    try:
+                        with torch.autograd.detect_anomaly():
+                            y = self.module.forward(X)
+                            torch.mean(y).backward()
+                    except Exception as e:
+                        print(e)
+                        
+                    print()
+                    print()
+                    print(">>> PARAMETERS: ")
+                    weights = optimizer.param_groups[0]['params']
+                    weights_flat = [torch.flatten(weight) for weight in weights]
+                    weights_1d = torch.cat(weights_flat)
+                    assert not torch.isnan(weights_1d).any()
+                    assert not torch.isinf(weights_1d).any()
+                    print(f"max params: {weights_1d.max()}, min: {weights_1d.min()}")
+                    
+                    grad_flat = [torch.flatten(weight.grad) for weight in weights if weight.grad != None]
+                    if grad_flat != []:
+                        grad_1d = torch.cat(grad_flat)
+                        assert not torch.isnan(grad_1d).any()
+                        assert not torch.isinf(grad_1d).any()
+                        print(f"max grad: {grad_1d.max()}, min: {grad_1d.min()}")
+                    
+                    for p in list(filter(lambda p: p.grad is not None, self.module.parameters())):
+                        print(p.grad.data.norm(2).item())
+                    
+                    # print("\nSaving failed model separately for debugging: ")
+                    # self.save("ckpt/fail_" + self.get_filename())
                     raise ArithmeticError("Failed training, loss = NaN")
         
                 # loss = (scale(x) - scale(y))^2
@@ -329,7 +368,7 @@ class PytorchModel(StandardModel):
                 loss=train_loss / (train_iter + 1)
                 err=math.sqrt(loss)*real_loss_scale
                 train_progress.set_postfix({
-                    "loss": format_loss(loss), "loss($)": format_loss(err) }, refresh=False)
+                    "loss": format_loss(loss), "loss($)": format_loss(err)}, refresh=False)
                 
             # Validate results
             module.eval()
@@ -345,6 +384,8 @@ class PytorchModel(StandardModel):
                     # print statistics
                     valid_loss += loss.item()
                     if math.isnan(valid_loss):
+                        print("\nSaving failed model separately for debugging: ")
+                        self.save("ckpt/fail_" + self.get_filename())
                         raise ArithmeticError("Failed training, val_loss = NaN")
             
                     val_loss = valid_loss / (valid_iter + 1)

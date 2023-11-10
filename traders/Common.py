@@ -69,7 +69,7 @@ class TradingDataset(Dataset):
         batch_size = 64
         # Output window for the TSDataset is 0
         # since we won't need to cut datapoints from the end to use in loss functions.
-        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0), batch_size)
+        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0, inference_model.conf.column_names), batch_size)
         
         bar_format = get_bar_format(len(batch_data), 1)
         
@@ -321,6 +321,7 @@ class StandardTrader:
         # Global action steps for epsilon decay
         steps = 0
         
+        verybad, bad, good, verygood = 0, 0, 0, 0
         for e in range(conf.episodes):
             # addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Episode {e+1}/{conf.episodes}")
@@ -415,11 +416,27 @@ class StandardTrader:
                                             refresh=False)
 
             self.runtime['episode'] += 1
+
+            # good market
+            if avg_mkt_profit > 0:
+                # good trade
+                if avg_profit > 0:
+                    good += 1
+                else:
+                    verybad += 1
+            # bad market
+            else:
+                # good trade
+                if avg_profit > 0:
+                    verygood += 1
+                else:
+                    bad += 1
             
             iters = len(idx_range)
             print(f"avg_mkt_profit: {avg_mkt_profit/iters:.2f}$; avg_mkt_delta: {avg_mkt_delta/iters:.2f}$")
             print(f"avg_profit: {avg_profit/iters:.2f}$; avg_delta: {avg_delta/iters:.2f}$")
             print(f"avg_profit diff: {(avg_profit-avg_mkt_profit)/iters:.2f}$; avg_delta diff: {(avg_delta - avg_mkt_delta)/iters:.2f}$")
+            print(f"very bad(+, -): {verybad}, bad(+/-): {bad}, good(+/+): {good}, very good(-/+): {verygood}")
             print(f"user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.")
             print()
             

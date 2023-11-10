@@ -22,6 +22,10 @@ class DatasetConfig:
     indicators  : list[dict] = None
     columns     : list[dict] = None
     
+    @property
+    def column_names(self):
+        return [ col['name'] for col in self.columns ]
+    
 @dataclass
 class IndicatorConfig:
     @classmethod

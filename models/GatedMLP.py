@@ -21,7 +21,7 @@ class GatedMLPConfig:
         })
         
     layer_count: int = 12
-    layer_dropout: float = 0.2
+    layer_dropout: float = 0
     embedding_length: int = 64
     attention_size: int = 64
     
@@ -51,8 +51,8 @@ class SpatialGatingUnit(nn.Module):
         super().__init__()
         
         # self.norm = nn.LayerNorm(d_ffn // 2)
-        self.bias = nn.Parameter(torch.ones(size=(seq_len,)))
-        self.weight = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps))
+        self.bias = nn.Parameter(torch.ones(size=(seq_len,)), True)
+        self.weight = nn.Parameter(torch.FloatTensor(size=(1, seq_len, seq_len)).uniform_(-init_eps, init_eps), True)
         
     def forward(self, x, gate_res=None):
         weight, bias = self.weight, self.bias
@@ -116,23 +116,24 @@ class GatedMLPBlock(nn.Module):
         else:
             self.attn = None
         
-        self.proj_in = nn.Sequential(
-            # nn.LayerNorm(d_model),
-            nn.Linear(d_model, d_ffn),
-            activation or nn.Identity()
-        )
+        self.norm = nn.LayerNorm([d_model])
+        self.proj_in = nn.Linear(d_model, d_ffn)
+        self.activation = activation
         self.sgu = SpatialGatingUnit(d_ffn, seq_len)
         self.proj_out = nn.Linear(d_ffn // 2, d_model)
         
     def forward(self, x):
         residual = x
         
-        if self.attn is not None:
+        if self.attn != None:
             gate_res = self.attn(x)
         else:
             gate_res = None
         
+        x = self.norm(x)
         x = self.proj_in(x)
+        if self.activation != None:
+            x = self.activation(x)
         x = self.sgu(x, gate_res)
         x = self.proj_out(x)
         
@@ -158,6 +159,50 @@ class DropoutLayers(nn.Module):
             
         return x
 
+class MBConv2dUnit(nn.Sequential):
+    def __init__(self, in_planes, out_planes, kernel_size=3, stride=1, groups=1, norm_layer=None):
+        padding = (kernel_size - 1) // 2
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        super().__init__(
+            nn.Conv2d(in_planes, out_planes, kernel_size, stride, padding, groups=groups, bias=False),
+            norm_layer(out_planes),
+            nn.ReLU6(inplace=True)
+        )
+
+class MBConv2d(nn.Module):
+    def __init__(self,
+                 in_channels:int, out_channels:int,
+                 expansion_factor=1, kernel_size:int=3, stride:int=1,
+                 norm_layer=None):
+        super().__init__()
+        
+        self.stride = stride
+        assert stride in [1, 2]
+        
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+            
+        ffn_channels = int(round(in_channels*expansion_factor))
+        
+        self.use_residual = in_channels == out_channels and stride == 1
+        
+        layers = []
+        if expansion_factor != 1:
+            layers += [MBConv2dUnit(in_channels, ffn_channels, 1)]
+        
+        layers += [MBConv2dUnit(ffn_channels, ffn_channels,
+                                kernel_size, stride, groups=ffn_channels, norm_layer=norm_layer)]
+        layers += [nn.Conv2d(ffn_channels, out_channels, 1, 1, 0, bias=False)]
+        
+        self.layers = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        if self.use_residual:
+            return x + self.layers(x)
+        else:
+            return self.layers(x)
+
 class GatedMLP(nn.Module):
     def __init__(self, model_json):
         super().__init__()
@@ -168,10 +213,10 @@ class GatedMLP(nn.Module):
         gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
         conf = ModelConfig.from_dict(model_json)
         
-        feature_count = len(conf.columns)
-        embedding_length = gmlp.embedding_length
-        seq_len = conf.seq_len
-        output_size = conf.out_seq_len
+        self.feature_count = feature_count = len(conf.columns)
+        self.embedding_length = embedding_length = gmlp.embedding_length
+        self.seq_len = seq_len = conf.seq_len
+        self.output_size = output_size = conf.out_seq_len
         
         d_ffn = conf.hidden_layer_size
         d_model = embedding_length * feature_count
@@ -188,8 +233,17 @@ class GatedMLP(nn.Module):
         # Layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
         self.unembed = nn.Linear(d_model, output_size)
+        
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
-        self.unproj = nn.Linear(seq_len*d_ffn, output_size)
+        self.relu = nn.ReLU(inplace=True)
+        self.linear = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Linear(d_ffn, d_ffn),
+            nn.ReLU(inplace=True),
+            nn.Linear(d_ffn, 1),
+        )
+        
+        self.unproj = nn.Linear(seq_len, 1)
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
@@ -202,6 +256,7 @@ class GatedMLP(nn.Module):
         
         # Assume 'close' is the 1st column
         input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
@@ -230,17 +285,20 @@ class GatedMLP(nn.Module):
         # -- Unencode
         # INPUT: x:                     (b, n, f*d)
         #        x = lstm(x):           (b, n, h)
-        #        x = x.reshape():       (b, n*h)
-        # GET:   x = linear(x):         (b, o)
+        #        x = linear(x):         (b, n, 1)
+        #        x = x.reshape():       (b, n)
+        # GET:   x :                    (b, n)
         x, hx = self.lstm(x)
-        x = F.relu(x)
-        x = x.reshape((x.shape[0], -1))
-        x = self.unproj(x)
+        x = self.linear(x)
+        x = x.squeeze(-1)
         
         # -- Unoffset
-        # INPUT: x:                     (b, o)
+        # INPUT: x:                     (b, n)
         # INPUT: input_offset:          (b, 1)
-        x = x + input_offset
+        # x = x + (input_offset - output_offset)
+        x = self.unproj(x)
+        # x = x + output_offset
+        
         return x
         
     def get_position_encoding(self, seq_len, d, n=10000):
