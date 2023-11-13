@@ -1,7 +1,11 @@
+import numpy as np
 import pandas as pd
 
 from dataclasses import dataclass
 import inspect
+
+import torch
+from torch.utils.data.dataset import Dataset
 
 import datasets.indicators as indicators
 
@@ -44,8 +48,6 @@ class IndicatorConfig:
     period2      : int  = 12
     is_input     : bool = False
     is_scaled    : bool = False
-    
-from torch.utils.data.dataset import Dataset
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, column_names=None):
@@ -106,6 +108,9 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                         
                     case 'MACD':
                         ind_values = indicators.get_series_macd(ind_conf.period, ind_conf.period2, close_values)
+                            
+                    case 'LOG_VOL':
+                        ind_values = indicators.get_series_log_vol(df['volume'])
                             
                     case _:
                         raise Exception("Invalid indicator name: " + ind_conf.function)

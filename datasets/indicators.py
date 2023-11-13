@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 
 def get_indicator_name_json(ind_json):
@@ -57,3 +58,6 @@ def get_series_macd(period1, period2, series):
             ind_values.append(ema2 - ema1)
     return ind_values
             
+            
+def get_series_log_vol(series):
+    return np.log(series.to_numpy())
