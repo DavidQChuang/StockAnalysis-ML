@@ -70,6 +70,16 @@ class TimeSeriesDataset(Dataset):
     @property
     def column_names(self):
         return self._column_names
+    
+    def get_collate_fn(self, device=None, **tensor_args):
+        if device == None:
+            return lambda batch:{
+                'X': torch.Tensor(np.array([item['X'] for item in batch ]), **tensor_args),
+                'y': torch.Tensor(np.array([item['y'] for item in batch ]), **tensor_args) }
+        else:
+            return lambda batch: {
+                'X': torch.Tensor(np.array([item['X'] for item in batch ]), **tensor_args).to(device),
+                'y': torch.Tensor(np.array([item['y'] for item in batch ]), **tensor_args).to(device) }
         
     def __len__(self):
         return len(self.df) - self.seq_len - self.out_seq_len + 1

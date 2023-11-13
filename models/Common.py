@@ -29,14 +29,6 @@ def format_loss(n):
     n = str(n)
     return f if len(f) < len(n) else n
 
-def format_tensor(t, use_cuda):
-    t = t.float()
-    
-    if use_cuda:
-        t = t.cuda()
-        
-    return t
-
 def count_parameters(model):
     # table = PrettyTable(["Modules", "Parameters"])
     total_params = 0
@@ -78,7 +70,8 @@ class ModelConfig:
     seq_len             : int = 24
     out_seq_len         : int = 1
     
-    precompile          : bool = False
+    precompile          : bool = False,
+    pin_memory          : bool = False,
     
     indicators          : list[dict] = None
     columns             : list[dict] = None
@@ -166,7 +159,7 @@ class StandardModel(ABC):
         
         return f"{classname}-{filename}.ckpt"
         
-    def get_training_data(self, dataset):
+    def get_training_data(self, dataset: TimeSeriesDataset):
         validation_ratio = self.conf.validation_split
         train_ratio = 1 - validation_ratio
         
@@ -174,12 +167,24 @@ class StandardModel(ABC):
         
         train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
         
-        if self.device != None and self.device != 'cpu':
-            train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
-            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=True, pin_memory_device=self.device)
+        #https://stackoverflow.com/questions/55563376/pytorch-how-does-pin-memory-work-in-dataloader
+        # If pinning, tensors on CPU remain in non-paged memory.
+        # This can speed up calls to Tensor.cuda()
+        #   and allows async calls with Tensor.cuda(non_blocking=True).
+        if self.conf.pin_memory == True:
+            train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
+                                               shuffle=False, pin_memory=True)
+            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size,
+                                               shuffle=False, pin_memory=True)
+        # If not pinning, use the dataset collate_fn that converts data
+        #   in numpy form to tensors on the correct device.
         else:
-            train_dataloader = data.DataLoader(train_data, batch_size=batch_size, shuffle=False)
-            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+            train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
+                                               collate_fn=dataset.get_collate_fn(device=self.device),
+                                               shuffle=False)
+            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size,
+                                               collate_fn=dataset.get_collate_fn(device=self.device),
+                                               shuffle=False)
         
         return train_dataloader, valid_dataloader
         
@@ -194,14 +199,13 @@ class PytorchModel(StandardModel):
         
         torch.set_float32_matmul_precision('high')
         
-        if device == "cuda":
-            self.module = self.module.float().cuda()
-        else:
-            self.module = self.module.float().cpu()
+        self.module = self.module.float()
+        if device != None:
+            self.module = self.module.to(device)
             
-        if self.conf.precompile:
+        if self.conf.precompile == True:
             self.module = torch.compile(self.module, fullgraph=True, mode="reduce-overhead")
-            print("Optimizing model.")
+            print("> Compiling model.")
         
         self.optimizer_state = None
         
@@ -220,6 +224,18 @@ class PytorchModel(StandardModel):
         return optimizer
             
     def single_train(self, X, Y_HAT, loss_func, optimizer):
+        """Performs a single forward and backward step with the optimizer and a loss calculation.
+        Model should be in training mode before this is run.
+
+        Args:
+            X (torch.Tensor): Input vector, must be same device as module.
+            Y_HAT (torch.Tensor): Expected output vector, must be same device as module.
+            loss_func (torch.nn._Loss): Loss function.
+            optimizer (torch.optim.Optimizer): The optimizer, must be initialized with module.parameters.
+
+        Returns:
+            (torch.Tensor, torch.Tensor): The output value and the loss.
+        """
         # zero the parameter gradients
         self.module.zero_grad()
 
@@ -234,6 +250,17 @@ class PytorchModel(StandardModel):
         return y, loss
             
     def single_infer(self, X, Y_HAT, loss_func):
+        """Performs a single inference and loss calculation with gradients off.
+        Model should be in evaluation mode before this is run.
+
+        Args:
+            X (torch.Tensor): Input vector, must be same device as module.
+            Y_HAT (torch.Tensor): Expected output vector, must be same device as module.
+            loss_func (torch.nn._Loss): Loss function.
+
+        Returns:
+            (torch.Tensor, torch.Tensor): The output value and the loss.
+        """
         with torch.no_grad():
             y    : torch.Tensor = self.module(X)
             loss : torch.Tensor = loss_func.forward(y, Y_HAT)
@@ -264,7 +291,7 @@ class PytorchModel(StandardModel):
             return
         
         # -- Setup
-        use_cuda = self.device == "cuda"
+        use_cuda = self.device != None and self.device != "cpu"
         module: nn.Module = self.module
 
         print(f'> Training model {self.get_model_name()}.')
@@ -274,7 +301,7 @@ class PytorchModel(StandardModel):
         
         # Scale data
         print()
-        dataset = self.scale_dataset(dataset, True)
+        dataset = self.scale_dataset(dataset, True) # dataset still numpy
         real_loss_scale = self.scaler.scale_[0]
         
         # Loss/optimizer functions
@@ -306,18 +333,22 @@ class PytorchModel(StandardModel):
             if use_cuda:
                 print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
             
-            # Scramble data
+            # Scramble data, this converts the numpy dataset into Tensors
             train, valid = self.get_training_data(dataset)
             
             # Train model
             module.train(True)
             train_loss = 0.0
-            train_data = []
-            for data in tqdm(train, bar_format=bar_format):
-                X    : torch.Tensor = format_tensor(data["X"], use_cuda)
-                Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
-                train_data.append({ "X": X, "y": Y_HAT })
-                
+            
+            if self.conf.pin_memory == True:
+                train_data = []
+                for data in tqdm(train, desc="Pinning", bar_format=bar_format):
+                    X    : torch.Tensor = data["X"].to(self.device, non_blocking=True)
+                    Y_HAT: torch.Tensor = data["y"].to(self.device, non_blocking=True)
+                    train_data.append({ "X": X, "y": Y_HAT })
+            else: 
+                train_data = train
+                    
             train_progress = tqdm(train_data, bar_format=bar_format)
             for train_iter, data in enumerate(train_progress):
                 X, Y_HAT = data["X"], data["y"]
@@ -368,7 +399,8 @@ class PytorchModel(StandardModel):
                 loss=train_loss / (train_iter + 1)
                 err=math.sqrt(loss)*real_loss_scale
                 train_progress.set_postfix({
-                    "loss": format_loss(loss), "loss($)": format_loss(err)}, refresh=False)
+                    "loss": format_loss(loss),
+                    "loss($)": format_loss(err)}, refresh=False)
                 
             # Validate results
             module.eval()
@@ -376,8 +408,8 @@ class PytorchModel(StandardModel):
             valid_progress = tqdm(valid, bar_format=bar_format)
             with torch.no_grad():
                 for valid_iter, data in enumerate(valid_progress):
-                    X    : torch.Tensor = format_tensor(data["X"], use_cuda)
-                    Y_HAT: torch.Tensor = format_tensor(data["y"], use_cuda)
+                    X    : torch.Tensor = data["X"]
+                    Y_HAT: torch.Tensor = data["y"]
                     
                     y, loss = self.single_infer(X, Y_HAT, loss_func)
 
