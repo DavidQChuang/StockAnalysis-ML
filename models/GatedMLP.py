@@ -159,50 +159,6 @@ class DropoutLayers(nn.Module):
             
         return x
 
-class MBConv2dUnit(nn.Sequential):
-    def __init__(self, in_planes, out_planes, kernel_size=3, stride=1, groups=1, norm_layer=None):
-        padding = (kernel_size - 1) // 2
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        super().__init__(
-            nn.Conv2d(in_planes, out_planes, kernel_size, stride, padding, groups=groups, bias=False),
-            norm_layer(out_planes),
-            nn.ReLU6(inplace=True)
-        )
-
-class MBConv2d(nn.Module):
-    def __init__(self,
-                 in_channels:int, out_channels:int,
-                 expansion_factor=1, kernel_size:int=3, stride:int=1,
-                 norm_layer=None):
-        super().__init__()
-        
-        self.stride = stride
-        assert stride in [1, 2]
-        
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-            
-        ffn_channels = int(round(in_channels*expansion_factor))
-        
-        self.use_residual = in_channels == out_channels and stride == 1
-        
-        layers = []
-        if expansion_factor != 1:
-            layers += [MBConv2dUnit(in_channels, ffn_channels, 1)]
-        
-        layers += [MBConv2dUnit(ffn_channels, ffn_channels,
-                                kernel_size, stride, groups=ffn_channels, norm_layer=norm_layer)]
-        layers += [nn.Conv2d(ffn_channels, out_channels, 1, 1, 0, bias=False)]
-        
-        self.layers = nn.Sequential(*layers)
-        
-    def forward(self, x):
-        if self.use_residual:
-            return x + self.layers(x)
-        else:
-            return self.layers(x)
-
 class GatedMLP(nn.Module):
     def __init__(self, model_json):
         super().__init__()
@@ -216,7 +172,7 @@ class GatedMLP(nn.Module):
         self.feature_count = feature_count = len(conf.columns)
         self.embedding_length = embedding_length = gmlp.embedding_length
         self.seq_len = seq_len = conf.seq_len
-        self.output_size = output_size = conf.out_seq_len
+        self.output_size = out_seq_len = conf.out_seq_len
         
         d_ffn = conf.hidden_layer_size
         d_model = embedding_length * feature_count
@@ -232,18 +188,13 @@ class GatedMLP(nn.Module):
         
         # Layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
-        self.unembed = nn.Linear(d_model, output_size)
+        self.unembed = nn.Linear(d_model, out_seq_len)
         
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
         self.relu = nn.ReLU(inplace=True)
-        self.linear = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Linear(d_ffn, d_ffn),
-            nn.ReLU(inplace=True),
-            nn.Linear(d_ffn, 1),
-        )
+        self.linear = nn.Linear(d_ffn, 1)
         
-        self.unproj = nn.Linear(seq_len, 1)
+        self.unproj = nn.Linear(seq_len, out_seq_len)
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
@@ -289,7 +240,9 @@ class GatedMLP(nn.Module):
         #        x = x.reshape():       (b, n)
         # GET:   x :                    (b, n)
         x, hx = self.lstm(x)
+        x = self.relu(x)
         x = self.linear(x)
+        x = self.relu(x)
         x = x.squeeze(-1)
         
         # -- Unoffset
