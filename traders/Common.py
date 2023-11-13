@@ -7,20 +7,19 @@ import random
 import time
 import numpy as np
 
-import pandas as pd
 from tqdm import tqdm
 
 from datasets.Common import DatasetConfig, TimeSeriesDataset
-from models.Common import StandardModel, format_tensor, get_bar_format
+from models.Common import StandardModel, get_bar_format
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.utils.data.dataset import Dataset
 
 from traders.LinearDQN import LinearDQN
+from traders.TradingDataset import TradingDataset
+from traders.TradingSimulation import TradingSimulation
 
 @dataclass
 class TraderConfig:
@@ -52,45 +51,6 @@ class TraderConfig:
         return "%d" % (
             self.hidden_layer_size)
     
-class TradingDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, inference_model: StandardModel):
-        self.df = df
-        
-        real_len = inference_model.conf.seq_len
-        infer_len = inference_model.conf.out_seq_len
-        self.real_len = real_len
-        
-        print(f'> Generating inference data:')
-        print(f'Inference model window: {real_len}+{infer_len}; Trader window: {real_len}+{infer_len}+2')
-        
-        device = torch.device(inference_model.device)
-        
-        # Get batches from the dataframe
-        batch_size = 64
-        # Output window for the TSDataset is 0
-        # since we won't need to cut datapoints from the end to use in loss functions.
-        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0, inference_model.conf.column_names), batch_size)
-        
-        bar_format = get_bar_format(len(batch_data), 1)
-        
-        # Generate future inferred datapoints
-        self.inferences = []
-        for i, data in tqdm(enumerate(batch_data), total=len(batch_data), bar_format=bar_format):
-            X = torch.Tensor(data["X"]).float().to(device)
-            y = inference_model.infer(X, False, False)
-            
-            self.inferences.extend(y.unbind(0))
-            
-        print()
-
-    def __len__(self):
-        return len(self.df) - self.real_len + 1
-    
-    def __getitem__(self, index):
-        real_values = self.df['close'][index: index + self.real_len]
-        return { "real": real_values.values, "inference": self.inferences[index] }
-    
-            
 Transition = namedtuple('Transition',
             ('state', 'action', 'next_state', 'reward'))
 
@@ -108,45 +68,6 @@ class ReplayMemory:
     def __len__(self):
         return len(self.memory)
     
-class TradingSimulation:
-    def __init__(self, money) -> None:
-        self.money: float = money
-        self.starting_money: float = money
-        self.volume: float = 0
-        
-    def valuation(self, current_price):
-        return self.money + self.volume * current_price
-    
-    def market_valuation(self, starting_price, current_price):
-        return self.starting_money / starting_price * current_price
-        
-    def step(self, action, current_price):
-        """Performs the given action (0b01 to sell, 0b10 to buy, 0b11 for both, 0b00 for none)
-        then returns the previous valuation.
-        """
-        prev_value = self.valuation(current_price)
-        # sell
-        if action & 1 != 0:
-            shares = self.volume
-            
-            self.money += current_price * shares
-            self.volume = 0
-            
-        # buy
-        if action & 2 != 0:
-            shares = int(self.money / current_price)
-            
-            self.money -= current_price * shares
-            self.volume += shares
-            
-        return prev_value
-            
-    def state(self):
-        return [ self.money, self.volume ]
-    
-    def action_count(self):
-        return 4
-
 class StandardTrader:
     def __init__(self, trader_json, device=None):
         self.conf = conf = TraderConfig.from_dict(trader_json)
@@ -252,7 +173,7 @@ class StandardTrader:
         torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
         optimizer.step()
         
-    def get_state(self, trade_sim, datapoint, device):
+    def get_state(self, trade_sim: TradingSimulation, datapoint, device):
         """Returns the current state of the DQN.
         Concatenates real datapoints first, then inferred future datapoints,
         then account value.
@@ -267,7 +188,8 @@ class StandardTrader:
         """
         price_state = torch.Tensor(datapoint["real"]).to(device)
         infer_state = torch.Tensor(datapoint["inference"]).to(device)
-        account_state = torch.Tensor(trade_sim.state()).to(device)
+        # Get account state from current price and future prediced price
+        account_state = torch.Tensor(trade_sim.state(datapoint["real"][-1], datapoint["inference"][0])).to(device)
         return torch.cat([price_state, infer_state, account_state])
         
     def standard_train(self, model: StandardModel, dataset: TimeSeriesDataset):
@@ -287,9 +209,9 @@ class StandardTrader:
         
         # Set up DQN
         # Inputs: stock prices up to current time, future predicted prices, and current account state
-        n_observations = model.conf.seq_len + model.conf.out_seq_len + 2
+        n_observations = model.conf.seq_len + model.conf.out_seq_len + TradingSimulation.state_size()
         # Outputs: nothing, buy, sell
-        n_actions = trade_sim.action_count()
+        n_actions = TradingSimulation.action_count()
         
         policy_net = torch.compile(LinearDQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
         target_net = torch.compile(LinearDQN(n_observations, n_actions, self.conf.hidden_layer_size).to(device))
@@ -309,6 +231,7 @@ class StandardTrader:
                 'episode': 0,
                 'steps': 0
             }
+        lifetime_episodes = self.runtime['episode'] + conf.episodes
             
         # -- Train multiple episodes
         # Time realtime and cpu time
@@ -321,10 +244,10 @@ class StandardTrader:
         # Global action steps for epsilon decay
         steps = 0
         
-        verybad, bad, good, verygood = 0, 0, 0, 0
+        verybad, bad, good, goodish, verygood = 0, 0, 0, 0, 0
         for e in range(conf.episodes):
-            # addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
-            print(f"Episode {e+1}/{conf.episodes}")
+            addl_desc = '' if first_run else f'; Total episodes: {self.runtime["episode"] + 1}/{lifetime_episodes}'
+            print(f"Episode {e+1}/{conf.episodes}{addl_desc}")
             if use_cuda:
                 print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
                 
@@ -373,7 +296,7 @@ class StandardTrader:
                 delta = (next_value - curr_value)
                 mkt_profit = (next_market_value - conf.starting_money)
                 mkt_delta = (next_market_value - market_value)
-                reward = (next_value - next_market_value) + profit
+                reward = trade_sim.scale_delta(profit + (next_value - next_market_value))
 
                 avg_profit += profit
                 avg_delta += delta
@@ -429,6 +352,8 @@ class StandardTrader:
                 # good trade
                 if avg_profit > 0:
                     verygood += 1
+                elif avg_profit > avg_mkt_profit:
+                    goodish += 1
                 else:
                     bad += 1
             
@@ -436,7 +361,7 @@ class StandardTrader:
             print(f"avg_mkt_profit: {avg_mkt_profit/iters:.2f}$; avg_mkt_delta: {avg_mkt_delta/iters:.2f}$")
             print(f"avg_profit: {avg_profit/iters:.2f}$; avg_delta: {avg_delta/iters:.2f}$")
             print(f"avg_profit diff: {(avg_profit-avg_mkt_profit)/iters:.2f}$; avg_delta diff: {(avg_delta - avg_mkt_delta)/iters:.2f}$")
-            print(f"very bad(+, -): {verybad}, bad(+/-): {bad}, good(+/+): {good}, very good(-/+): {verygood}")
+            print(f"very bad(+/-): {verybad}, bad(-/-): {bad}, good(+/+): {good}, goodish(-<-): {goodish}, very good(-/+): {verygood}")
             print(f"user: {time.time() - start_time:.2f}s; sys: {time.process_time() - pstart_time:.2f}s.")
             print()
             
