@@ -50,7 +50,9 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
             df = self.download_csv(new_url, self.get_filename(query_params, slice), forceOverwrite)
             dfs.append(df)
             
-        df = pd.concat(dfs, ignore_index=True)
+        df = pd.concat(dfs)
+        df = df.iloc[::-1].reset_index(drop=True)
+        print(df)
         return df
     
     def get_filename(self, query_params, slice):
