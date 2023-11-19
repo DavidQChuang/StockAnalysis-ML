@@ -1,5 +1,6 @@
 from models.Common import PytorchModel, StandardModel, DeepspeedModel
 from models.GatedMLP import GatedMLP
+from models.GatedCNN import GatedCNN
 from models.SimpleLSTM import SimpleLSTM
 # from models.TemporalFusionTransformer import TemporalFusionTransformer
 
@@ -44,6 +45,8 @@ def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardMo
     match model_name:
         case 'GatedMLP':
             network = GatedMLP(model_json)
+        case 'GatedCNN':
+            network = GatedCNN(model_json)
         case 'SimpleLSTM':
             network = SimpleLSTM(model_json)
         # case 'TFT':

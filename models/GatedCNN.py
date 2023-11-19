@@ -1,8 +1,35 @@
 
+import einops
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from models.Common import ModelConfig
-from models.GatedMLP import DropoutLayers, GatedMLPBlock, GatedMLPConfig
+from models.GatedMLP import DropoutLayers, GatedMLPConfig, QKVAttention, SpatialGatingUnit2
+
+class CausalConv1d(torch.nn.Conv1d):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 stride=1,
+                 dilation=1,
+                 groups=1,
+                 bias=True):
+
+        super(CausalConv1d, self).__init__(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=0,
+            dilation=dilation,
+            groups=groups,
+            bias=bias)
+        
+        self.__padding = (kernel_size - 1) * dilation
+        
+    def forward(self, input):
+        return super(CausalConv1d, self).forward(F.pad(input, (self.__padding, 0)))
 
 class MBConv2dUnit(nn.Sequential):
     def __init__(self, in_planes, out_planes, kernel_size=3, stride=1, groups=1, norm_layer=None):
@@ -48,7 +75,47 @@ class MBConv2d(nn.Module):
         else:
             return self.layers(x)
         
-class GatedMLP(nn.Module):
+
+class GatedCNNBlock(nn.Module):
+    def __init__(self, d_ffn, d_model, seq_len, d_attn=0, activation=None):
+        """
+        Args:
+            d_ffn (int): dimensionality of the internal feed-forward part (hidden layer size)
+            d_model (int): dimensionality (d) of the input (embedding size)
+            seq_len (int): length of the token sequence; window size (n)
+            See 'Pay Attention to MLPs' (arxiv:2105.08050)
+        """
+        super().__init__()
+        
+        if d_attn > 0:
+            self.attn = QKVAttention(d_model, d_ffn // 2, d_attn)
+        else:
+            self.attn = None
+        
+        self.norm = nn.LayerNorm([d_model])
+        self.proj_in = nn.Linear(d_model, d_ffn)
+        self.activation = activation
+        self.sgu = SpatialGatingUnit2(d_ffn, seq_len)
+        self.proj_out = nn.Linear(d_ffn // 2, d_model)
+        
+    def forward(self, x):
+        residual = x
+        
+        if self.attn != None:
+            gate_res = self.attn(x)
+        else:
+            gate_res = None
+        
+        x = self.norm(x)
+        x = self.proj_in(x)
+        if self.activation != None:
+            x = self.activation(x)
+        x = self.sgu(x, gate_res)
+        x = self.proj_out(x)
+        
+        return x + residual
+        
+class GatedCNN(nn.Module):
     def __init__(self, model_json):
         super().__init__()
         
@@ -61,55 +128,45 @@ class GatedMLP(nn.Module):
         self.feature_count = feature_count = len(conf.columns)
         self.embedding_length = embedding_length = gmlp.embedding_length
         self.seq_len = seq_len = conf.seq_len
-        self.output_size = output_size = conf.out_seq_len
+        self.output_size = out_seq_len = conf.out_seq_len
         
         d_ffn = conf.hidden_layer_size
-        d_model = embedding_length * feature_count
+        d_model = embedding_length
         d_attn = gmlp.attention_size
         
         L = gmlp.layer_count
         
         # GMLP stack
-        layers = [GatedMLPBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
-        
-        position_embed = self.get_position_encoding(seq_len, embedding_length)
-        self.register_buffer("position_embed", position_embed, True)
+        layers = [GatedCNNBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
         # Layers
+        self.expand = nn.Conv1d(feature_count, embedding_length, 1, bias=False)
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
-        self.unembed = nn.Linear(d_model, output_size)
+        self.unembed = nn.Linear(d_model, out_seq_len)
         
-        # conv_layers = [
-        #     nn.Conv2d(feature_count, 32, 3, 2),
-        #     MBConv2d(32, 16, 1, 3, 1),
-        #     MBConv2d(16, 32, 6, 3, 2),
-        #     # MBConv2d(32, 128, 6, 3, 1),
-        #     # nn.Conv2d(128, 256, 1, 1),
-        #     nn.AvgPool2d(7),
-        #     nn.Conv2d(32, 16, 1, 2)
-        # ]
-        # self.conv = nn.Sequential(*conv_layers)
-        self.lstm = nn.LSTM(16, 16, batch_first=True)
-        # self.relu = nn.ReLU(inplace=True)
-        self.unproj = nn.Sequential(
+        self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
+        self.linear = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Linear(16, 16),
+            nn.Linear(d_ffn, d_ffn),
             nn.ReLU(inplace=True),
-            nn.Linear(16, 1),
+            nn.Linear(d_ffn, 1)
         )
         
-        # self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
-        # self.relu = nn.ReLU(inplace=True)
-        # self.unproj = nn.Linear(seq_len*d_ffn, output_size)
+        self.unproj = nn.Linear(seq_len, 1)
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
         # Make sure x is shape (batch_size, seq_len, features)
-        # This unsqueezes x from (b, n) to (b, n, 1)
+        # This unsqueezes x from (n) to (1, n, 1)
         if len(x.shape) == 1:
-            x = x[None, :]
+            x = x[None, :, None]
         if len(x.shape) == 2:
-            x = x.unsqueeze(2)
+            # This unsqueezes x from (n, f) to (1, n, f)
+            if x.shape[1] == self.feature_count:
+                x = x.unsqueeze(0)
+            # This unsqueezes x from (b, n) to (b, n, 1)
+            else:
+                x = x.unsqueeze(-1)
         
         # Assume 'close' is the 1st column
         input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
@@ -117,52 +174,34 @@ class GatedMLP(nn.Module):
         # -- Offset
         # INPUT: x:                     (b, n, f)
         # INPUT: input_offset:          (b, 1)
-        x[:, :, 0] = x[:, :, 0] - input_offset
+        # x[:, :, 0] = x[:, :, 0] - input_offset
         
-        # -- Positional encoding
+        # -- Depthwise convolution to expand channels
         # INPUT: x:                     (b, n, f)
-        # INPUT: positional_encoding:   (n, d)
-        #        x.split(1, -1):        list[f]: (b, n, d)
-        #        xs[i] * pos_enc:       (b, n, d)
-        #        x = torch.stack(xs):   (b, n, f, d)
-        #        x = x.reshape():       (b, n, f*d)
-        # Split by feature and add positional encoding to each feature datapoint
-        xs = list(x.split(1, -1))
-        for i in range(0, x.shape[-1]):
-            xs[i] = xs[i] * self.position_embed
-        x = torch.stack(xs, -1)
-        x = x.reshape(x.shape[0:2]+(-1,))
+        # GET:   x:                     (b, d, n)
+        x = einops.rearrange(x, "b n f -> b f n")
+        x = self.expand(x)
+        x = einops.rearrange(x, "b d n -> b n d")
         
         # -- FFN
-        # INPUT: x:                     (b, n, f*d)
-        # GET:   x = L(x):              (b, n, f*d)    
+        # INPUT: x:                     (b, n, d)
+        # GET:   x = L(x):              (b, n, d)    
         x = self.stack(x)
         
         # -- Unencode
-        # INPUT: x:                     (b, n, f*d)
+        # INPUT: x:                     (b, n, d)
         #        x = lstm(x):           (b, n, h)
-        #        x = unproj(x):         (b, n, 16)
-        #        x = x.reshape():       (b, n*h)
-        # GET:   x = linear(x):         (b, o)
-            #    x = x.movedim(2,1)     (b, f*d, n)
-            #    x = x.reshape(...)     (b, f, d, n)
-            #    x = x.conv(...)        (b, 64, 1, 1)
-        # x, hx = self.lstm(x)
-        x:torch.Tensor = x.movedim(2,1)
-        x = x.reshape((x.shape[0], self.feature_count, self.embedding_length, self.seq_len))
-        x = self.conv(x)
-        x = x.reshape((x.shape[0], x.shape[1]))
+        # GET:   x = linear(x):         (b, n, 1)
         x, hx = self.lstm(x)
-        x = self.unproj(x)
-        # x = F.gelu(x)
-        # x = x.reshape((x.shape[0], -1))
-        # x = x.movedim(1, -1)
-        # x = self.unproj(x)
+        x = self.linear(x)
         
         # -- Unoffset
-        # INPUT: x:                     (b, o)
+        # INPUT: x:                     (b, n, 1)
         # INPUT: input_offset:          (b, 1)
-        x = x + input_offset
+        # x = x + (input_offset - output_offset)
+        x = self.unproj(x.squeeze(-1))
+        # x = x + output_offset
+        
         return x
         
     def get_position_encoding(self, seq_len, d, n=10000):
