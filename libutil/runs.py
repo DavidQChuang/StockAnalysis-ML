@@ -47,9 +47,12 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
         if 'env' in file_json:
             for key, value in file_json['env'].items():
                 if value not in os.environ:
-                    raise Exception(f"Environment variable {value} not found.")
-                
-                env_value = os.environ[value]
+                    if value in kwargs:
+                        env_value = kwargs[value]
+                    else:
+                        raise Exception(f"Environment variable {value} not found.")
+                else: 
+                    env_value = os.environ[value]
                 key_path = key.split('.')
                 
                 curr = file_json
