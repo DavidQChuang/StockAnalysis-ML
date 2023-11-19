@@ -72,10 +72,10 @@ class TimeSeriesDataset(Dataset):
         return self._column_names
     
     def get_collate_fn(self, device=None, **tensor_args):
-        if device == None:
+        if device == None or device.startswith('cpu'):
             return lambda batch:{
-                'X': torch.Tensor(np.array([item['X'] for item in batch ]), **tensor_args),
-                'y': torch.Tensor(np.array([item['y'] for item in batch ]), **tensor_args) }
+                'X': torch.Tensor(np.array([item['X'] for item in batch ]), **tensor_args).float(),
+                'y': torch.Tensor(np.array([item['y'] for item in batch ]), **tensor_args).float() }
         else:
             return lambda batch: {
                 'X': torch.Tensor(np.array([item['X'] for item in batch ]), **tensor_args).to(device),

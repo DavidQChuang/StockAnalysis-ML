@@ -158,6 +158,10 @@ class StandardModel(ABC):
         classname = self.get_model_name()
         
         return f"{classname}-{filename}.ckpt"
+    
+    @property
+    def pin_memory(self):
+        return (self.device != None and not self.device.startswith('cpu') and self.conf.pin_memory == True)
         
     def get_training_data(self, dataset: TimeSeriesDataset):
         validation_ratio = self.conf.validation_split
@@ -171,7 +175,8 @@ class StandardModel(ABC):
         # If pinning, tensors on CPU remain in non-paged memory.
         # This can speed up calls to Tensor.cuda()
         #   and allows async calls with Tensor.cuda(non_blocking=True).
-        if self.conf.pin_memory == True:
+        if self.pin_memory:
+            print("Pinning")
             train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
                                                shuffle=False, pin_memory=True)
             valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size,
@@ -179,6 +184,7 @@ class StandardModel(ABC):
         # If not pinning, use the dataset collate_fn that converts data
         #   in numpy form to tensors on the correct device.
         else:
+            print("Unpinned")
             train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
                                                collate_fn=dataset.get_collate_fn(device=self.device),
                                                shuffle=False)
@@ -200,11 +206,11 @@ class PytorchModel(StandardModel):
         torch.set_float32_matmul_precision('high')
         
         self.module = self.module.float()
-        if device != None:
+        if device != None and not device.startswith('cpu'):
             self.module = self.module.to(device)
             
         if self.conf.precompile == True:
-            self.module = torch.compile(self.module, fullgraph=True, mode="reduce-overhead")
+            self.module = torch.compile(self.module, mode="reduce-overhead")
             print("> Compiling model.")
         
         self.optimizer_state = None
@@ -216,7 +222,7 @@ class PytorchModel(StandardModel):
         return nn.MSELoss()
     
     def get_optimizer(self):
-        optimizer = optim.Adam(self.module.parameters())
+        optimizer = optim.Adam(self.module.parameters(), lr=0.0005, weight_decay=0.0001)
         
         if self.optimizer_state is not None:
             optimizer.load_state_dict(self.optimizer_state)
@@ -328,26 +334,33 @@ class PytorchModel(StandardModel):
         
         # -- Training
         for e in range(run_epochs):
+            # Logging stuff
             addl_desc = '' if first_run else f'; Total epochs: {self.runtime["epoch"] + 1}/{lifetime_epochs}'
             print(f"Epoch {e+1}/{run_epochs}{addl_desc}")
             if use_cuda:
-                print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-            
+                print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB ", end='')
+                
             # Scramble data, this converts the numpy dataset into Tensors
             train, valid = self.get_training_data(dataset)
+            
+            # Pin memory
+            train_data = []
+            if self.pin_memory == True:
+                for data in tqdm(train, desc="Pinning", bar_format=bar_format):
+                    X    : torch.Tensor = data["X"].float().to(self.device)
+                    Y_HAT: torch.Tensor = data["y"].float().to(self.device)
+                    train_data.append({ "X": X, "y": Y_HAT })
+            else:
+                # Putting the data in a list seems to be slightly faster than
+                # iterating over the dataset directly for some reason
+                for data in tqdm(train, desc="Pinning", bar_format=bar_format):
+                    X    : torch.Tensor = data["X"]
+                    Y_HAT: torch.Tensor = data["y"]
+                    train_data.append({ "X": X, "y": Y_HAT })
             
             # Train model
             module.train(True)
             train_loss = 0.0
-            
-            if self.conf.pin_memory == True:
-                train_data = []
-                for data in tqdm(train, desc="Pinning", bar_format=bar_format):
-                    X    : torch.Tensor = data["X"].to(self.device, non_blocking=True)
-                    Y_HAT: torch.Tensor = data["y"].to(self.device, non_blocking=True)
-                    train_data.append({ "X": X, "y": Y_HAT })
-            else: 
-                train_data = train
                     
             train_progress = tqdm(train_data, bar_format=bar_format)
             for train_iter, data in enumerate(train_progress):
@@ -408,8 +421,12 @@ class PytorchModel(StandardModel):
             valid_progress = tqdm(valid, bar_format=bar_format)
             with torch.no_grad():
                 for valid_iter, data in enumerate(valid_progress):
-                    X    : torch.Tensor = data["X"]
-                    Y_HAT: torch.Tensor = data["y"]
+                    if self.pin_memory:
+                        X    : torch.Tensor = data["X"].float().to(self.device)
+                        Y_HAT: torch.Tensor = data["y"].float().to(self.device)
+                    else:
+                        X    : torch.Tensor = data["X"]
+                        Y_HAT: torch.Tensor = data["y"]
                     
                     y, loss = self.single_infer(X, Y_HAT, loss_func)
 

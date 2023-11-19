@@ -119,7 +119,7 @@ class GatedMLPBlock(nn.Module):
         self.norm = nn.LayerNorm([d_model])
         self.proj_in = nn.Linear(d_model, d_ffn)
         self.activation = activation
-        self.sgu = SpatialGatingUnit(d_ffn, seq_len)
+        self.sgu = SpatialGatingUnit2(d_ffn, seq_len)
         self.proj_out = nn.Linear(d_ffn // 2, d_model)
         
     def forward(self, x):
@@ -175,44 +175,57 @@ class GatedMLP(nn.Module):
         self.output_size = out_seq_len = conf.out_seq_len
         
         d_ffn = conf.hidden_layer_size
-        d_model = embedding_length * feature_count
         d_attn = gmlp.attention_size
-        
+        if embedding_length == 0:
+            d_model = feature_count
+        else:
+            d_model = embedding_length * feature_count
+            
         L = gmlp.layer_count
         
         # GMLP stack
         layers = [GatedMLPBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
-        position_embed = self.get_position_encoding(seq_len, embedding_length)
-        self.register_buffer("position_embed", position_embed, True)
+        if embedding_length != 0:
+            position_embed = self.get_position_encoding(seq_len, embedding_length)
+            self.register_buffer("position_embed", position_embed, True)
         
         # Layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
         self.unembed = nn.Linear(d_model, out_seq_len)
         
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
-        self.relu = nn.ReLU(inplace=True)
-        self.linear = nn.Linear(d_ffn, 1)
+        self.linear = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Linear(d_ffn, d_ffn),
+            nn.ReLU(inplace=True),
+            nn.Linear(d_ffn, 1)
+        )
         
-        self.unproj = nn.Linear(seq_len, out_seq_len)
+        self.unproj = nn.Linear(seq_len, 1)
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
         # Make sure x is shape (batch_size, seq_len, features)
-        # This unsqueezes x from (b, n) to (b, n, 1)
+        # This unsqueezes x from (n) to (1, n, 1)
         if len(x.shape) == 1:
-            x = x[None, :]
+            x = x[None, :, None]
         if len(x.shape) == 2:
-            x = x.unsqueeze(2)
+            # This unsqueezes x from (n, f) to (1, n, f)
+            if x.shape[1] == self.feature_count:
+                x = x.unsqueeze(0)
+            # This unsqueezes x from (b, n) to (b, n, 1)
+            else:
+                x = x.unsqueeze(-1)
         
         # Assume 'close' is the 1st column
-        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
-        output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
+        # input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        # output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
         # INPUT: input_offset:          (b, 1)
-        x[:, :, 0] = x[:, :, 0] - input_offset
+        # x[:, :, 0] = x[:, :, 0] - input_offset
         
         # -- Positional encoding
         # INPUT: x:                     (b, n, f)
@@ -222,11 +235,12 @@ class GatedMLP(nn.Module):
         #        x = torch.stack(xs):   (b, n, f, d)
         #        x = x.reshape():       (b, n, f*d)
         # Split by feature and add positional encoding to each feature datapoint
-        xs = list(x.split(1, -1))
-        for i in range(0, x.shape[-1]):
-            xs[i] = xs[i] * self.position_embed
-        x = torch.stack(xs, -1)
-        x = x.reshape(x.shape[0:2]+(-1,))
+        if self.embedding_length != 0:
+            xs = list(x.split(1, -1))
+            for i in range(0, x.shape[-1]):
+                xs[i] = xs[i] * self.position_embed
+            x = torch.stack(xs, -1)
+            x = x.reshape(x.shape[0:2]+(-1,))
         
         # -- FFN
         # INPUT: x:                     (b, n, f*d)
@@ -236,20 +250,15 @@ class GatedMLP(nn.Module):
         # -- Unencode
         # INPUT: x:                     (b, n, f*d)
         #        x = lstm(x):           (b, n, h)
-        #        x = linear(x):         (b, n, 1)
-        #        x = x.reshape():       (b, n)
-        # GET:   x :                    (b, n)
+        # GET:   x = linear(x):         (b, n, 1)
         x, hx = self.lstm(x)
-        x = self.relu(x)
         x = self.linear(x)
-        x = self.relu(x)
-        x = x.squeeze(-1)
         
         # -- Unoffset
-        # INPUT: x:                     (b, n)
+        # INPUT: x:                     (b, n, 1)
         # INPUT: input_offset:          (b, 1)
-        # x = x + (input_offset - output_offset)
-        x = self.unproj(x)
+        # x = x.squeeze(-1) + (input_offset - output_offset)
+        x = self.unproj(x.squeeze(-1))
         # x = x + output_offset
         
         return x

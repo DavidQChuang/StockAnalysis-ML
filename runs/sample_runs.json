@@ -127,12 +127,35 @@
             "copy_run": "Intra-LSTM-TQQQ",
             "model_name": "GatedMLP",
             "model": {
-                "epochs": 12,
+                "epochs": 16,
                 "hidden_layer_size": 128,
+                "dropout_rate": 0.1,
+
+                "seq_len": 72,
+                "out_seq_len": 1,
+
+                "precompile": false,
+                "pin_memory": true,
+
                 "gmlp": {
-                    "encoding_length": 128,
+                    "embedding_length": 48,
                     "layer_count": 8
                 }
+            },
+            "trader": {
+                "episodes": 64,
+                "hidden_layer_size": 2048
+            }
+        },
+        "Intra-GCNN-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model_name": "GatedCNN"
+        },
+        "Intra-GCNN-Testing-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model_name": "GatedCNN",
+            "model": {
+                "epochs": 1
             }
         },
         "Intra-Ext-GMLP-TQQQ": {
@@ -142,7 +165,7 @@
                 "epochs": 12,
                 "hidden_layer_size": 128,
                 "gmlp": {
-                    "encoding_length": 128,
+                    "embedding_length": 128,
                     "layer_count": 8
                 }
             }
