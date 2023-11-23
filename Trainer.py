@@ -87,8 +87,9 @@ def main():
         trader_file = load_thing(trader, args.trader_file, args.rebuild_trader)
         trader.standard_train(model, dataset)
     
-        print(f"> Saving trader to {trader_file}")
-        trader.save(trader_file)
+        if not trader.conf.episodes == 0:
+            print(f"> Saving trader to {trader_file}")
+            trader.save(trader_file)
             
 def load_thing(model, model_file, rebuild_model):
     model_file = f"ckpt/{model.get_filename()}" if model_file == None else model_file
