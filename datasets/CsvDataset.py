@@ -16,8 +16,21 @@ class CsvDataset(AdvancedTimeSeriesDataset):
         
         file_path = dataset_json['file_path']
         
-        if not os.path.exists(file_path):
+        if os.path.isdir(file_path):
+            dfs = []
+            
+            files = [f for f in os.listdir('.') if f.endswith('.py')]
+            for f in files:
+                dfs.append(pd.read_csv(f))
+                
+            df = pd.concat(dfs)
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values(by="timestamp")
+
+        elif os.path.exists(file_path):
+            df = pd.read_csv(file_path)
+            
+        else:
             raise Exception(f"CSV file `{file_path}` does not exist.")
         
-        df = pd.read_csv(file_path)
         super().__init__(df, conf)
