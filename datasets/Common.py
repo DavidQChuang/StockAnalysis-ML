@@ -50,7 +50,7 @@ class IndicatorConfig:
     is_scaled    : bool = False
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, column_names=None):
+    def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, column_names: list[str]=None):
         self.df: pd.DataFrame = df
         self._seq_len = seq_len
         self._out_seq_len = out_seq_len
@@ -60,15 +60,15 @@ class TimeSeriesDataset(Dataset):
             raise Exception("Dataset was given no column names to use as input.")
         
     @property
-    def seq_len(self):
+    def seq_len(self) -> int:
         return self._seq_len
     
     @property
-    def out_seq_len(self):
+    def out_seq_len(self)-> int:
         return self._out_seq_len
     
     @property
-    def column_names(self):
+    def column_names(self) -> list[str]:
         return self._column_names
     
     def get_collate_fn(self, device=None, **tensor_args):
@@ -99,6 +99,7 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
         
         # Calculate indicators
         start_index = 0
+        
         if self.conf.indicators != None:
             print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
             for indicator in self.conf.indicators:
@@ -133,6 +134,20 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
         # Remove values without indicators
         if start_index != 0:
             df = df.iloc[start_index:, :]
+        
+        df = df.assign(timestamp = pd.to_datetime(df['timestamp']))
+        for col in self.conf.columns:
+            match col['name']:
+                case 'dt_day':
+                    df['dt_day'] = df['timestamp'].dt.day
+                case 'dt_month':
+                    df['dt_month'] = df['timestamp'].dt.month
+                case 'dt_year':
+                    df['dt_year'] = df['timestamp'].dt.year
+                case 'dt_hour':
+                    df['dt_hour'] = df['timestamp'].dt.hour
+                case 'dt_minute':
+                    df['dt_minute'] = df['timestamp'].dt.minute
         
         if self.conf.indicators != None:
             print(df.iloc[0:5, :])
