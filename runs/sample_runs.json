@@ -70,10 +70,10 @@
                     "symbol": "TQQQ",
 
                     "function": "TIME_SERIES_INTRADAY",
-                    "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
-                                "year1month5", "year1month6", "year1month7", "year1month8" ],
+                    "months": "-24",
                     "interval": "5min",
-                    "outputsize": "full"
+                    "outputsize": "full",
+                    "extended_hours": false
                 },
                 "indicators": [
                     {
@@ -91,7 +91,8 @@
                     }
                 ],
                 "columns": [
-                    { "name": "close", "is_scaled": true }
+                    { "name": "close", "is_scaled": true },
+                    { "name": "dt_hour", "is_scaled": true }
                 ]
             },
 
@@ -128,7 +129,7 @@
             "model_name": "GatedMLP",
             "model": {
                 "epochs": 16,
-                "hidden_layer_size": 128,
+                "hidden_layer_size": 512,
                 "dropout_rate": 0.1,
 
                 "seq_len": 72,
@@ -143,13 +144,20 @@
                 }
             },
             "trader": {
-                "episodes": 64,
+                "episodes": 0,
                 "hidden_layer_size": 2048
             }
         },
         "Intra-GCNN-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",
-            "model_name": "GatedCNN"
+            "model_name": "GatedCNN",
+            "model": {
+                "epochs": 32
+            },
+            "gmlp": {
+                "embedding_length": 48,
+                "layer_count": 4
+            }
         },
         "Intra-GCNN-Testing-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",

@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from datasets.Common import TimeSeriesDataset
+from datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
         
 import torch
 import math
@@ -63,15 +63,15 @@ class ModelConfig:
     epochs              : int = 15
     
     # General NN architecture params
-    hidden_layer_size   : int = 50
-    dropout_rate        : int = 0.3
+    hidden_layer_size   : int   = 50
+    dropout_rate        : float = 0.3
     
     # Model I/O parameters
     seq_len             : int = 24
     out_seq_len         : int = 1
     
-    precompile          : bool = False,
-    pin_memory          : bool = False,
+    precompile          : bool = False
+    pin_memory          : bool = False
     
     indicators          : list[dict] = None
     columns             : list[dict] = None
@@ -108,7 +108,10 @@ class StandardModel(ABC):
         print('Fitting dataset.')
         print('Before: ', dataset.df[dataset.column_names][:3].to_numpy(), 'dtype=', dataset.df['close'].dtype)
         
-        columns_to_scale = [ col['name'] for col in dataset.columns if 'is_scaled' in col and col['is_scaled']]
+        if isinstance(dataset, AdvancedTimeSeriesDataset):
+            columns_to_scale = [ col['name'] for col in dataset.columns if 'is_scaled' in col and col['is_scaled']]
+        else:
+            columns_to_scale = dataset.column_names
         
         if fit:
             dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale])
@@ -219,7 +222,7 @@ class PytorchModel(StandardModel):
         return self.model_name
     
     def get_loss_func(self):
-        return nn.MSELoss()
+        return nn.SmoothL1Loss()
     
     def get_optimizer(self):
         optimizer = optim.Adam(self.module.parameters(), lr=0.0005, weight_decay=0.0001)

@@ -37,8 +37,8 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
         
     print(f"> Reading run file {run_file}")
     if os.path.exists(run_file):
-        with open(run_file) as run_file:
-            file_json = json.load(run_file)
+        with open(run_file) as file:
+            file_json = json.load(file)
             
         except_nokey(file_json, 'runs', 'runs file')
             
@@ -145,8 +145,8 @@ def from_input(run_file: str, **kwargs) -> dict:
     
     # Check for file
     if os.path.exists(run_file):
-        with open(run_file) as run_file:
-            file_json = json.load(run_file)
+        with open(run_file) as file:
+            file_json = json.load(file)
             
         if 'runs' not in file_json:
             raise Exception("'runs' key must be present in runs file.")

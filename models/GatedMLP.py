@@ -10,6 +10,7 @@ import inspect
 
 from .Common import ModelConfig, PytorchModel
 from .SimpleLSTM import LSTMBlock
+import models.embeddings as embeddings
 
 @dataclass(frozen=True)    
 class GatedMLPConfig:
@@ -187,7 +188,7 @@ class GatedMLP(nn.Module):
         layers = [GatedMLPBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
         if embedding_length != 0:
-            position_embed = self.get_position_encoding(seq_len, embedding_length)
+            position_embed = embeddings.get_position_encoding(seq_len, embedding_length)
             self.register_buffer("position_embed", position_embed, True)
         
         # Layers
@@ -219,13 +220,13 @@ class GatedMLP(nn.Module):
                 x = x.unsqueeze(-1)
         
         # Assume 'close' is the 1st column
-        # input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
-        # output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
+        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
         # INPUT: input_offset:          (b, 1)
-        # x[:, :, 0] = x[:, :, 0] - input_offset
+        x[:, :, 0] = x[:, :, 0] - input_offset
         
         # -- Positional encoding
         # INPUT: x:                     (b, n, f)
@@ -259,15 +260,6 @@ class GatedMLP(nn.Module):
         # INPUT: input_offset:          (b, 1)
         # x = x.squeeze(-1) + (input_offset - output_offset)
         x = self.unproj(x.squeeze(-1))
-        # x = x + output_offset
+        x = x + input_offset
         
         return x
-        
-    def get_position_encoding(self, seq_len, d, n=10000):
-        P = torch.zeros((seq_len, d), dtype=torch.float32)
-        for k in range(seq_len):
-            for i in torch.arange(d // 2):
-                denominator = torch.pow(n, 2*i/d)
-                P[k, 2*i] = torch.sin(k/denominator)
-                P[k, 2*i+1] = torch.cos(k/denominator)
-        return P

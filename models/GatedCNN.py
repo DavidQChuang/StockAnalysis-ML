@@ -140,7 +140,11 @@ class GatedCNN(nn.Module):
         layers = [GatedCNNBlock(d_ffn, d_model, seq_len, d_attn, activation=nn.GELU()) for i in range(L)]
         
         # Layers
+        # Conv layers
         self.expand = nn.Conv1d(feature_count, embedding_length, 1, bias=False)
+        # self.expand = MBConv2d()
+        
+        # Dense layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
         self.unembed = nn.Linear(d_model, out_seq_len)
         
@@ -169,7 +173,7 @@ class GatedCNN(nn.Module):
                 x = x.unsqueeze(-1)
         
         # Assume 'close' is the 1st column
-        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        # input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
@@ -181,6 +185,7 @@ class GatedCNN(nn.Module):
         # GET:   x:                     (b, d, n)
         x = einops.rearrange(x, "b n f -> b f n")
         x = self.expand(x)
+        
         x = einops.rearrange(x, "b d n -> b n d")
         
         # -- FFN
@@ -203,12 +208,3 @@ class GatedCNN(nn.Module):
         # x = x + output_offset
         
         return x
-        
-    def get_position_encoding(self, seq_len, d, n=10000):
-        P = torch.zeros((seq_len, d), dtype=torch.float32)
-        for k in range(seq_len):
-            for i in torch.arange(d // 2):
-                denominator = torch.pow(n, 2*i/d)
-                P[k, 2*i] = torch.sin(k/denominator)
-                P[k, 2*i+1] = torch.cos(k/denominator)
-        return P

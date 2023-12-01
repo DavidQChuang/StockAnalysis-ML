@@ -6,6 +6,7 @@
 /model
 /runs/model_runs.json
 
+user_vars.py
 user-vars.sh
 /venv
 
