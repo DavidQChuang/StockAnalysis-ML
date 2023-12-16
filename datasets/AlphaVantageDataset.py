@@ -44,11 +44,25 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
         else:
             dfs = self.download_files(query_params, months, forceOverwrite)
                 
+        # Combine the dfs, dropping original index
         df = pd.concat(dfs, ignore_index=True)
+        
+        # Drop index thing 
+        df.drop(df.columns[0], axis=1, inplace=True)
+        
+        # Convert timestamps to np.datetime64
         df.loc[:, 'timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # Sort by timestamp
         df = df.sort_values(by="timestamp")
         
-        df.to_csv("csv/test.csv")
+        # Remove duplicates by timestamp
+        df, old_df = df.drop_duplicates(subset=['timestamp'], keep='first'), df
+        if len(old_df.values) != len(df.values):
+            print(f"! Removing {len(old_df.values) - len(df.values)} duplicates")
+            
+        # Reset index and drop old
+        df = df.reset_index(drop=True)
         
         return df
     
@@ -73,7 +87,7 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
             if months[0] == '-':
                 first_month = int(months)
                 months = [ i for i in range(first_month, 1) ]
-                print(months)
+                # print(months)
             else:
                 raise SyntaxError("Invalid month string. Must be -[months].")
         
@@ -89,7 +103,7 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
             
             new_url = url + slice_str
         
-            print(new_url)
+            # print(new_url)
             df = self.download_csv(new_url,
                     self.get_filename(query_params, month_str, dir="monthly"), forceOverwrite)
             dfs.append(df)

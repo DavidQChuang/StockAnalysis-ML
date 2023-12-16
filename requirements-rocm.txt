@@ -7,3 +7,5 @@ pandas==2.0.0
 prettytable==3.8.0
 scikit_learn==1.2.2
 tqdm==4.65.0
+torch==2.0.1+rocm5.4.2
+torchvision==0.15.2+rocm5.4.2

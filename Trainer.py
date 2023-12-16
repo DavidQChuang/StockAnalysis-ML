@@ -1,4 +1,7 @@
 import argparse
+from datetime import datetime, timedelta
+import numpy as np
+from pytz import timezone
 
 import random
 import os
@@ -45,6 +48,13 @@ def main():
     parser.add_argument('-ds', '--deepspeed', dest='use_deepspeed', action="store_true",
                         help='Enables deepspeed.')
 
+    parser.add_argument('-ei', '--eval-inference', dest='eval_inference_count', type=int,
+                        help='Enables evaluation mode for inference. Gets the latest data and then runs the given number of inferences and prints them.')
+
+    # parser.add_argument('-et', '--eval-trader', dest='eval_trader_count', type=int,
+    #                     help="""Enables evaluation mode for trading. Gets the latest data and then runs the given number of inferences, then runs the trader and prints
+    #                     the inferences and the trader's actions.""")
+
     # Parse args
     args = parser.parse_args()
     args_dict = vars(args)
@@ -71,25 +81,78 @@ def main():
     # Start run:
     dataset = libutil.datasets.from_run(run_data, **args_dict)
     model = libutil.models.from_run(run_data, **args_dict)
-    trader = libutil.traders.from_run(run_data, **args_dict)
     
-    if not os.path.isdir("ckpt"):
-        os.mkdir("ckpt")
-    
-    model_file = load_thing(model, args.model_file, args.rebuild_model)
-    model.standard_train(dataset)
-    
-    if not model.conf.epochs == 0:
-        print(f"> Saving model to {model_file}")
-        model.save(model_file)
+    # Run mode
+    if args.eval_inference_count == None: # and args.eval_trader_count == None:
+        trader = libutil.traders.from_run(run_data, **args_dict)
         
-    if trader is not None:
-        trader_file = load_thing(trader, args.trader_file, args.rebuild_trader)
-        trader.standard_train(model, dataset)
-    
-        if not trader.conf.episodes == 0:
-            print(f"> Saving trader to {trader_file}")
-            trader.save(trader_file)
+        if not os.path.isdir("ckpt"):
+            os.mkdir("ckpt")
+        
+        if not model.conf.epochs == 0:
+            model_file = load_thing(model, args.model_file, args.rebuild_model)
+            model.standard_train(dataset)
+            
+            print(f"> Saving model to {model_file}")
+            model.save(model_file)
+        else:
+            print("> No model epochs, skipping.")
+            
+        if trader is not None:
+            if not trader.conf.episodes == 0:
+                trader_file = load_thing(trader, args.trader_file, args.rebuild_trader)
+                trader.standard_train(model, dataset)
+        
+                print(f"> Saving trader to {trader_file}")
+                trader.save(trader_file)
+            else:
+                print("> No trader episodes, skipping.")
+    else: # and args.eval_trader_count != None:
+        # Load model
+        model_file = load_thing(model, args.model_file, args.rebuild_model)
+        
+        tz = timezone('EST')
+        strftime_format = "%A, %D %X %Z"
+
+        # Print current date
+        print()
+        print("# [currently] Current date: ", datetime.now(tz).strftime(strftime_format))
+        
+        # Get timestep of dataset
+        dt_cols = dataset.df.select_dtypes(include=[np.datetime64]) # type: ignore ; this is a valid argument
+        timestep: timedelta
+        
+        dataset.df.to_csv("csv/test.csv")
+        
+        if verbosity >= 2:
+            print(f"@ datetime datatypes ('timestamp' included ? {'timestamp' in dt_cols.columns}): ", dt_cols)
+        if 'timestamp' in dt_cols:
+            dt_delta = dt_cols['timestamp'].diff().iloc[1:]
+            if verbosity >= 2:
+                print("@ dt_delta: ", dt_delta)
+                print("@ idxmin-1: ", dt_delta.idxmin(), dataset.df.loc[dt_delta.idxmin()-1, :])
+                print("@ idxmin: ", dt_delta.idxmin(), dataset.df.loc[dt_delta.idxmin(), :])
+            timestep = dt_delta.min()
+        else:
+            raise KeyError("No 'timestamp' column with np.datetime64 dtype. Datasets should include such a column, or it is not being loaded properly.")
+            
+        print(f"# [timestep] Detected timestep ({timestep.days} days {timestep.seconds//3600:02d}:{timestep.seconds//60 % 60:02d}:{timestep.seconds%60:02d}).")
+            
+        if timestep <= timedelta(minutes=0):
+            print("!! timestep: ", timestep)
+            raise ValueError("Detected timestep was non-positive. The dataset is in the wrong order or has duplicate elements.")
+        
+        # Make and print inferences
+        curr_date: datetime = dataset.df['timestamp'].iloc[-1] # when the inference occurs
+        curr_input: np.ndarray = dataset[-model.conf.seq_len:]['X']   # np array with input data
+        
+        # for i in range(args.eval_inference_count):
+        curr_date += timestep
+        output = model.infer(curr_input)
+        
+        print(f"# [inference] [step={0}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={output}]")
+            
+        
             
 def load_thing(model, model_file, rebuild_model):
     model_file = f"ckpt/{model.get_filename()}" if model_file == None else model_file

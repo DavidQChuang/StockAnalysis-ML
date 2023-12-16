@@ -1,8 +1,9 @@
+from collections import defaultdict
 import os
 import time
 from tqdm import tqdm
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import inspect
 
 import pandas as pd
@@ -10,6 +11,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 from datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
+import models.loss as loss
         
 import torch
 import math
@@ -62,6 +64,9 @@ class ModelConfig:
     batch_size          : int = 64
     epochs              : int = 15
     
+    learning_rate       : float = 0.001
+    weight_decay        : float = 0.0001
+    
     # General NN architecture params
     hidden_layer_size   : int   = 50
     dropout_rate        : float = 0.3
@@ -73,12 +78,27 @@ class ModelConfig:
     precompile          : bool = False
     pin_memory          : bool = False
     
-    indicators          : list[dict] = None
-    columns             : list[dict] = None
-    
+    indicators          : list[dict] = field(default_factory=lambda: []) 
+    columns             : list[dict] = field(default_factory=lambda: [ { "name": "close" } ])
+        
     @property
     def column_names(self):
         return [ col['name'] for col in self.columns ]
+    
+    @property
+    def scaled_column_names(self):
+        '''
+        Returns all column names where is_scaled is not false or not present.
+        '''
+        x =  [ col['name'] for col in self.columns if (not 'is_scaled' in col) or (col['is_scaled']) ]
+        return x
+    
+    @property
+    def input_column_names(self):
+        '''
+        Returns all column names where is_input is present and true.
+        '''
+        return [ col['name'] for col in self.columns if 'is_scaled' in col and col['is_scaled'] ]
     
     @property
     def model_filename(self):
@@ -91,9 +111,9 @@ class StandardModel(ABC):
         
         self.device = device
         self.conf = ModelConfig.from_dict(model_json)
-        self.scaler = StandardScaler()
+        self.scaler = StandardScaler(copy=True)
         
-        if verbosity >= 1:
+        if verbosity >= 2:
             print("> Model config: ")
             print(self.conf)
             print()
@@ -105,44 +125,71 @@ class StandardModel(ABC):
         print(f"Splitting data at a {train_ratio} ratio: {train_data}/{dataset_len-train_data}")
         
     def scale_dataset(self, dataset: TimeSeriesDataset, fit=False):
-        print('Fitting dataset.')
-        print('Before: ', dataset.df[dataset.column_names][:3].to_numpy(), 'dtype=', dataset.df['close'].dtype)
-        
-        if isinstance(dataset, AdvancedTimeSeriesDataset):
-            columns_to_scale = [ col['name'] for col in dataset.columns if 'is_scaled' in col and col['is_scaled']]
-        else:
-            columns_to_scale = dataset.column_names
+        columns_to_scale = self.conf.scaled_column_names
         
         if fit:
-            dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale])
-        else: 
-            dataset.df[columns_to_scale] = self.scaler.transform(dataset.df[columns_to_scale])
+            print('> Scaling and fitting dataset.')
+            print('Before: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
         
-        print('After: ', dataset.df[dataset.column_names][:3].to_numpy(), 'dtype=', dataset.df['close'].dtype)
+            dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale]) # type: ignore ; this is matrixlike
+        else:
+            print('> Scaling dataset.')
+            print('Before: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
+            
+            if not hasattr(self.scaler, 'mean_'):
+                raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run Model.scale_dataset(dataset, fit=True) first.")
+            
+            dataset.df[columns_to_scale] = self.scaler.transform(dataset.df[columns_to_scale]) # type: ignore
+        
+        print('After: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
         print()
         
         return dataset
     
-    def scale_input(self, input):
+    def scale_input(self, input, column='close', delta=False):
         """
-        Scales an unscaled input x into the standard distribution this model was fitted to.
+        Scales an unscaled input x into the standard distribution this model was fitted to.\n
+        If the input is the difference between two unscaled inputs, set delta to True.
             z = (x - u) / s
         """
-        return (input - self.scaler.mean_[0]) / self.scaler.scale_[0]
+            
+        if not hasattr(self.scaler, 'mean_'):
+            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run Model.scale_dataset(dataset, fit=True) first.")
+        
+        index = column
+        if type(column) is str:
+            index = self.conf.scaled_column_names.index(column)
+        
+        if delta == True:
+            return input / self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
+        else:
+            return (input - self.scaler.mean_[index]) / self.scaler.scale_[index] # type: ignore
     
-    def scale_output(self, output):
+    def scale_output(self, output, column: str|int ='close', delta=False):
         """
-        Unscales a scaled output z into unscaled units.
+        Unscales a scaled output z into unscaled units.\n
+        If the input is the difference between two scaled outputs, set delta to True.
             x = z * s + u
         """
-        return output * self.scaler.scale_[0] + self.scaler.mean_[0]
+            
+        if not hasattr(self.scaler, 'mean_'):
+            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run self.scale_dataset(dataset, fit=True) first.")
+        
+        index = column
+        if type(column) is str:
+            index = self.conf.scaled_column_names.index(column)
+        
+        if delta == True:
+            return output * self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
+        else:
+            return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
         
     @abstractmethod
     def standard_train(self, dataset):
         pass
     
     @abstractmethod
-    def infer(self, X, scale_inputs=False, scale_outputs=False):
+    def infer(self, X, scale_inputs=True, scale_outputs=True):
         pass
     
     @abstractmethod
@@ -198,6 +245,8 @@ class StandardModel(ABC):
         return train_dataloader, valid_dataloader
         
 class PytorchModel(StandardModel):
+    runtime: dict | None
+    
     def __init__(self, network: nn.Module, model_json: dict, device=None, verbosity=1):
         super().__init__(model_json, device, verbosity)
         
@@ -222,10 +271,27 @@ class PytorchModel(StandardModel):
         return self.model_name
     
     def get_loss_func(self):
-        return nn.SmoothL1Loss()
+        loss_funcs = self.conf.loss.split('+')
+        loss_instances = []
+        
+        for func in loss_funcs:
+            func = func.strip()
+            
+            if func == 'mean_squared_error' or func == 'mse':
+                loss_instances.append(nn.MSELoss())
+            elif func == 'mean_absolute_directional' or func == 'mad':
+                loss_instances.append(loss.MADLoss())
+            elif func == 'smooth_l1_loss' or func == 'smooth_l1':
+                loss_instances.append(nn.SmoothL1Loss())
+                
+        if len(loss_funcs) == 1:
+            return loss_instances[0]
+        else:
+            return loss.CombinedLoss(loss_instances)
+        # return nn.SmoothL1Loss()
     
     def get_optimizer(self):
-        optimizer = optim.Adam(self.module.parameters(), lr=0.0005, weight_decay=0.0001)
+        optimizer = optim.Adam(self.module.parameters(), lr=self.conf.learning_rate, weight_decay=self.conf.weight_decay)
         
         if self.optimizer_state is not None:
             optimizer.load_state_dict(self.optimizer_state)
@@ -276,14 +342,14 @@ class PytorchModel(StandardModel):
             
             return y, loss
     
-    def infer(self, X, scale_inputs=False, scale_outputs=False):
+    def infer(self, X, scale_inputs=True, scale_outputs=True):
         with torch.no_grad():
             if scale_inputs:
                 input = self.scale_input(X)
             else:
                 input = X
                     
-            output = self.module.forward(input)
+            output = self.module.forward(torch.Tensor(input, device=self.device))
             
             if scale_outputs:
                 output = self.scale_output(output)
@@ -307,24 +373,29 @@ class PytorchModel(StandardModel):
         count_parameters(module)
         print()
         self.print_validation_split(len(dataset))
-        
-        # Scale data
         print()
-        dataset = self.scale_dataset(dataset, True) # dataset still numpy
-        real_loss_scale = self.scaler.scale_[0]
-        
-        # Loss/optimizer functions
-        loss_func = self.get_loss_func()
-        optimizer = self.get_optimizer()
         
         # Runtime logging stuff
         first_run = self.runtime == None
-        if first_run:
+        if self.runtime == None:
             self.runtime = {
                 'epoch': 0,
                 'loss': 0,
                 'val_loss': 0
             }
+        
+        # Scale data (fit only if scaler is not already fit)
+        should_fit_data = not hasattr(self.scaler, "mean_")
+        dataset = self.scale_dataset(dataset, should_fit_data) # dataset still numpy
+        if should_fit_data:
+            self.runtime['columns'] = self.conf.column_names
+            self.runtime['mean_'] = self.scaler.mean_
+            self.runtime['var_'] = self.scaler.var_
+            self.runtime['scale_'] = self.scaler.scale_
+        
+        # Loss/optimizer functions
+        loss_func = self.get_loss_func()
+        optimizer = self.get_optimizer()
         
         # Current session epochs & lifetime epochs
         run_epochs = self.conf.epochs
@@ -364,6 +435,7 @@ class PytorchModel(StandardModel):
             # Train model
             module.train(True)
             train_loss = 0.0
+            train_err = 0.0
                     
             train_progress = tqdm(train_data, bar_format=bar_format)
             for train_iter, data in enumerate(train_progress):
@@ -410,17 +482,18 @@ class PytorchModel(StandardModel):
                     # self.save("ckpt/fail_" + self.get_filename())
                     raise ArithmeticError("Failed training, loss = NaN")
         
-                # loss = (scale(x) - scale(y))^2
-                # x = inv_scale(sqrt(loss))
-                loss=train_loss / (train_iter + 1)
-                err=math.sqrt(loss)*real_loss_scale
+                train_err += (torch.abs(y - Y_HAT)).mean().item()
+                
+                loss = train_loss / (train_iter + 1)
+                err = self.scale_output(train_err / (train_iter + 1), delta=True) # accurate if loss < 1
                 train_progress.set_postfix({
                     "loss": format_loss(loss),
-                    "loss($)": format_loss(err)}, refresh=False)
+                    "err($)": format_loss(err)}, refresh=False)
                 
             # Validate results
             module.eval()
             valid_loss = 0.0
+            valid_err = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
             with torch.no_grad():
                 for valid_iter, data in enumerate(valid_progress):
@@ -440,10 +513,12 @@ class PytorchModel(StandardModel):
                         self.save("ckpt/fail_" + self.get_filename())
                         raise ArithmeticError("Failed training, val_loss = NaN")
             
+                    valid_err += (torch.abs(y - Y_HAT)).mean().item()
+                
                     val_loss = valid_loss / (valid_iter + 1)
-                    val_err=math.sqrt(val_loss)*real_loss_scale
+                    val_err = self.scale_output(valid_err / (valid_iter + 1), delta=True)
                     valid_progress.set_postfix({
-                        "val_loss": format_loss(val_loss), "val_loss($)": format_loss(val_err) }, refresh=False)
+                        "val_loss": format_loss(val_loss), "val_err($)": format_loss(val_err) }, refresh=False)
                 
             self.runtime['epoch'] += 1
                 
@@ -455,20 +530,39 @@ class PytorchModel(StandardModel):
         self.optimizer_state = None if optimizer is None else optimizer.state_dict()
             
     def save(self, filename=None):
+        """Saves the model to a checkpoint file. If no filename is given, defaults to ckpt/{StandardModel.get_filename()}.
+        
+        The model must be initialized. Models can be initialized by one of two methods: loading from file with self.load(),
+        or training a new model with self.standard_train(dataset).
+
+        Args:
+            filename (str, optional): The path to save the checkpoint file to. Defaults to ckpt/{StandardModel.get_filename()}.
+
+        Raises:
+            RuntimeError: If there is no runtime data from an initialized model (see above), raises a RuntimeError.
+        """
+        
         filename = filename if filename != None else f"ckpt/{self.get_filename()}"
         
         print("> Saving model: ")
         
         if self.runtime == None:
-            raise Exception("Cannot save model without running it first.")
+            raise RuntimeError("Cannot save model without running it first.")
         
+        # self.runtime is initialized upon self.standard_train(), or upon self.load().
         ckpt = {
             'epoch': self.runtime["epoch"],
             'model_state': self.module.state_dict(),
             'optimizer_state': self.optimizer_state,
             'loss': self.runtime["loss"],
-            'val_loss': self.runtime["val_loss"]
+            'val_loss': self.runtime["val_loss"],
+            
+            'columns': self.runtime['columns'],
+            'mean_': self.runtime['mean_'],
+            'var_': self.runtime['var_'],
+            'scale_': self.runtime['scale_'],
         }
+        
         print({
             'epoch': ckpt['epoch'],
             'loss': ckpt['loss'],
@@ -488,11 +582,35 @@ class PytorchModel(StandardModel):
         self.module.load_state_dict(ckpt['model_state'])
         self.optimizer_state = ckpt['optimizer_state']
         
-        self.runtime = {
-            'epoch': ckpt['epoch'],
-            'loss': ckpt['loss'],
-            'val_loss': ckpt['val_loss'],
-        }
+        # has saved scaler data
+        if 'mean_' in ckpt:
+            self.runtime = {
+                'epoch': ckpt['epoch'],
+                'loss': ckpt['loss'],
+                'val_loss': ckpt['val_loss'],
+                
+                'columns': ckpt['columns'],
+                'mean_': ckpt['mean_'],
+                'var_': ckpt['var_'],
+                'scale_': ckpt['scale_'],
+            }
+            
+            if not 'columns' in ckpt:
+                print("> !!! Model has no columns, saved model may not match.")
+            elif self.runtime['columns'] != self.conf.column_names:
+                raise ValueError(f"Model is invalid; Columns are different from saved model. Old: {self.runtime['columns']}, New: {self.conf.column_names}.")
+            
+            # Set scaler values
+            self.scaler.mean_ = self.runtime['mean_']
+            self.scaler.var_ = self.runtime['var_']
+            self.scaler.scale_ = self.runtime['scale_']
+        # does not have scaled scaler data (legacy), will fit in standard_train.
+        else:
+            self.runtime = {
+                'epoch': ckpt['epoch'],
+                'loss': ckpt['loss'],
+                'val_loss': ckpt['val_loss'],
+            }
         
         print(self.runtime)
         print()

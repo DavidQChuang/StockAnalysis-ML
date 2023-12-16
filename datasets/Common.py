@@ -30,6 +30,20 @@ class DatasetConfig:
     def column_names(self):
         return [ col['name'] for col in self.columns ]
     
+    @property
+    def scaled_column_names(self):
+        '''
+        Returns all column names where is_scaled is not false or not present.
+        '''
+        return [ col['name'] for col in self.columns if (not 'is_scaled' in col) or (not col['is_scaled']) ]
+    
+    @property
+    def input_column_names(self):
+        '''
+        Returns all column names where is_input is present and true.
+        '''
+        return [ col['name'] for col in self.columns if 'is_scaled' in col and col['is_scaled'] ]
+    
 @dataclass
 class IndicatorConfig:
     @classmethod
@@ -47,7 +61,7 @@ class IndicatorConfig:
     period       : int  = 20
     period2      : int  = 12
     is_input     : bool = False
-    is_scaled    : bool = False
+    is_scaled    : bool = True
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, df: pd.DataFrame, seq_len=0, out_seq_len=0, column_names: list[str]=None):
@@ -104,13 +118,13 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
             print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
             for indicator in self.conf.indicators:
                 ind_conf = IndicatorConfig.from_dict(indicator)
-                ind_values = [0] * ind_conf.period
                 
-                # How many values to remove from the start of the arraydue to insufficient data points
-                start_index = max(start_index, ind_conf.period)
+                # How many values to remove from the start of the array due to insufficient data points
+                values_to_remove = ind_conf.period
+                
                 close_values = df['close']
                 
-                match ind_conf.function:
+                match ind_conf.function.upper():
                     case 'SMA':
                         ind_values = indicators.get_series_sma(ind_conf.period, close_values)
                         
@@ -122,9 +136,17 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                             
                     case 'LOG_VOL':
                         ind_values = indicators.get_series_log_vol(df['volume'])
+                        values_to_remove = 0
+                        
+                    case 'DELTA_CLOSE':
+                        ind_values = df['close'].diff()
+                        values_to_remove = 1
                             
                     case _:
                         raise Exception("Invalid indicator name: " + ind_conf.function)
+                
+                # Set amount of values to remove to the largest removal size
+                start_index = max(start_index, values_to_remove)
 
                 if ind_conf.name == None:
                     ind_conf.name = indicators.get_indicator_name(ind_conf.function, ind_conf.period)
@@ -150,7 +172,7 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                     df['dt_minute'] = df['timestamp'].dt.minute
         
         if self.conf.indicators != None:
-            print(df.iloc[0:5, :])
+            # print(df.iloc[0:5, :])
             print()
             
         self.df: pd.DataFrame = df
@@ -166,4 +188,13 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
     
     @property
     def column_names(self):
-        return [ col['name'] for col in self.conf.columns ]
+        return self.conf.column_names
+    
+    @property
+    def scaled_column_names(self):
+        return self.conf.scaled_column_names
+        
+    @property
+    def input_column_names(self):
+        return self.conf.input_column_names
+    

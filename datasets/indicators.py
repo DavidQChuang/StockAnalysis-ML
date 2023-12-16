@@ -3,10 +3,10 @@ import numpy as np
 from tqdm import tqdm
 
 def get_indicator_name_json(ind_json):
-    return 'close_' + ind_json['function'].lower() + str(ind_json['period'])
+    return 'close_' + ind_json['function'].lower() + str(ind_json['period'] if 'period' in ind_json else "")
 
 def get_indicator_name(function, period):
-    return 'close_' + function + str(period)
+    return 'close_' + function + str(period or "")
 
 def init_indicator(period, series):
     series_size = len(series)
@@ -17,26 +17,44 @@ def init_indicator(period, series):
 def get_single_sma(index, period, series):
     return series[index-period:index].sum() / period
 
-def get_series_sma(period, series):
+def get_series_sma(period, series, verbosity=0):
     (series_size, ind_values) = init_indicator(period, series)
     
-    print("Processing " + str(series_size) + " values")
-    for i in tqdm(range(period, series_size), ncols=80):
+    # Main iterator
+    iter = range(period, series_size)
+    
+    # Enable logging if verbose
+    if verbosity >= 2:
+        print("Processing " + str(series_size) + " values")
+        iter = tqdm(iter, ncols=80)
+        
+    # Iterate
+    for i in iter:
         ind_values.append(get_single_sma(i, period, series))
+        
     return ind_values
         
-def get_series_ema(period, series):
+def get_series_ema(period, series, verbosity=0):
     (series_size, ind_values) = init_indicator(period, series)
     ind_values.append(get_single_sma(period, period, series))
     
     mult = 2/(1+period)
     
-    print("Processing " + str(series_size) + " values")
-    for i in tqdm(range(period+1, series_size), ncols=80):
+    # Main iterator
+    iter = range(period+1, series_size)
+    
+    # Enable logging if verbose
+    if verbosity >= 2:
+        print("Processing " + str(series_size) + " values")
+        iter = tqdm(iter, ncols=80)
+        
+    # Iterate
+    for i in iter:
         ind_values.append(series[i]*mult + ind_values[-1]*(1-mult))
+        
     return ind_values
         
-def get_series_macd(period1, period2, series):
+def get_series_macd(period1, period2, series, verbosity=0):
     (series_size, ind_values) = init_indicator(period1, series)
     
     prev_ema1 = get_single_sma(period1, period1, series)
@@ -46,8 +64,16 @@ def get_series_macd(period1, period2, series):
     mult1 = 2/(1+period1)
     mult2 = 2/(1+period2)
     
-    print("Processing " + str(series_size) + " values")
-    for i in tqdm(range(period2+1, series_size), ncols=80):
+    # Main iterator
+    iter = range(period2+1, series_size)
+    
+    # Enable logging if verbose
+    if verbosity >= 2:
+        print("Processing " + str(series_size) + " values")
+        iter = tqdm(iter, ncols=80)
+        
+    # Iterate
+    for i in iter:
         ema2 = series[i]*mult2 + prev_ema2*(1-mult2)
         prev_ema2 = ema2
             
@@ -56,6 +82,7 @@ def get_series_macd(period1, period2, series):
             prev_ema1 = ema1
             
             ind_values.append(ema2 - ema1)
+            
     return ind_values
             
             

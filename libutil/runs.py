@@ -129,7 +129,7 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
                     run_data['dataset']['columns'].append({
                         "name": ind_name,
                         "from_indicator": True,
-                        "is_scaled": 'is_scaled' in indicator and indicator['is_scaled']
+                        "is_scaled": 'is_scaled' not in indicator or indicator['is_scaled']
                     })
         
         print(f"> Running {run_name}")
@@ -161,8 +161,7 @@ def from_input(run_file: str, **kwargs) -> dict:
         raise Exception("Runs file does not exist.")
     
     # Select run from input
-    do = True
-    while do:
+    while True:
         run_name = input("> Select run (enter to exit): ")
         
         if run_name == "":
@@ -177,7 +176,7 @@ def from_input(run_file: str, **kwargs) -> dict:
             print('! Invalid run.')
             continue
         
-        do = False
+        break
     
     return from_file(run_file, run_name)
     

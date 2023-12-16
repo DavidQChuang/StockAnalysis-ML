@@ -20,7 +20,7 @@
             "epochs": 4,
             
             "hidden_layer_size": 128,
-            "dropout_rate": 0.3,
+            "dropout_rate": 0.2,
                 
             "deepspeed": {
                 "gradient_accumulation_steps": 1,
@@ -70,7 +70,7 @@
                     "symbol": "TQQQ",
 
                     "function": "TIME_SERIES_INTRADAY",
-                    "months": "-24",
+                    "months": "-8",
                     "interval": "5min",
                     "outputsize": "full",
                     "extended_hours": false
@@ -87,7 +87,15 @@
                         "period": 26,
                         "period2": 12,
                         "is_input": true,
-                        "is_scaled": false
+                        "is_scaled": true
+                    },
+                    {
+                        "function": "delta_close",
+                        "is_input": true
+                    },
+                    {
+                        "function": "log_vol",
+                        "is_input": true
                     }
                 ],
                 "columns": [
@@ -115,12 +123,7 @@
             "copy_run": "Intra-LSTM-TQQQ",
             "dataset": {
                 "alphavantage": {
-                    "slices": [ "year1month1", "year1month2", "year1month3", "year1month4",
-                                "year1month5", "year1month6", "year1month7", "year1month8",
-                                "year1month9", "year1month10", "year1month11", "year1month12",
-                                "year2month1", "year2month2", "year2month3", "year2month4",
-                                "year2month5", "year2month6", "year2month7", "year2month8",
-                                "year2month9", "year2month10", "year2month11", "year2month12" ]
+                    "months": "-24"
                 }
             }
         },
@@ -128,9 +131,10 @@
             "copy_run": "Intra-LSTM-TQQQ",
             "model_name": "GatedMLP",
             "model": {
-                "epochs": 16,
-                "hidden_layer_size": 512,
-                "dropout_rate": 0.1,
+                "epochs": 1,
+                "hidden_layer_size": 128,
+                "dropout_rate": 0.0,
+                "learning_rate": 0.001,
 
                 "seq_len": 72,
                 "out_seq_len": 1,
@@ -139,7 +143,7 @@
                 "pin_memory": true,
 
                 "gmlp": {
-                    "embedding_length": 48,
+                    "embedding_length": 32,
                     "layer_count": 8
                 }
             },
@@ -148,11 +152,37 @@
                 "hidden_layer_size": 2048
             }
         },
+        "Intra-GMLP128-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model": {
+                "epochs": 16,
+                "hidden_layer_size": 128
+            }
+        },
+        "Intra-GMLP256-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model": {
+                "epochs": 24,
+                "hidden_layer_size": 256
+            }
+        },
+        "Intra-GMLP-MADL-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model": {
+                "loss": "mse + madl"
+            }
+        },
+        "Intra-GMLP-Testing-TQQQ": {
+            "copy_run": "Intra-GMLP-TQQQ",
+            "model": {
+                "epochs": 1
+            }
+        },
         "Intra-GCNN-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",
             "model_name": "GatedCNN",
             "model": {
-                "epochs": 32
+                "epochs": 8
             },
             "gmlp": {
                 "embedding_length": 48,
