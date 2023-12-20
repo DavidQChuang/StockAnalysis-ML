@@ -116,7 +116,7 @@ def main():
 
         # Print current date
         print()
-        print("# [currently] Current date: ", datetime.now(tz).strftime(strftime_format))
+        print("# [current_time] Current date: ", datetime.now(tz).strftime(strftime_format))
         
         # Get timestep of dataset
         dt_cols = dataset.df.select_dtypes(include=[np.datetime64]) # type: ignore ; this is a valid argument
@@ -130,7 +130,7 @@ def main():
             dt_delta = dt_cols['timestamp'].diff().iloc[1:]
             if verbosity >= 2:
                 print("@ dt_delta: ", dt_delta)
-                print("@ idxmin-1: ", dt_delta.idxmin(), dataset.df.loc[dt_delta.idxmin()-1, :])
+                # print("@ idxmin-1: ", dt_delta.idxmin(), dataset.df.loc[dt_delta.idxmin()-1, :])
                 print("@ idxmin: ", dt_delta.idxmin(), dataset.df.loc[dt_delta.idxmin(), :])
             timestep = dt_delta.min()
         else:
@@ -144,13 +144,14 @@ def main():
         
         # Make and print inferences
         curr_date: datetime = dataset.df['timestamp'].iloc[-1] # when the inference occurs
-        curr_input: np.ndarray = dataset[-model.conf.seq_len:]['X']   # np array with input data
+        curr_input: np.ndarray = dataset.get(-1)['X']   # type: ignore ; np array with input data
         
         # for i in range(args.eval_inference_count):
-        curr_date += timestep
-        output = model.infer(curr_input)
+        output = model.infer(curr_input).item()
         
-        print(f"# [inference] [step={0}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={output}]")
+        print(f"# [inference] [step={-1}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={dataset.df['close'].iloc[-1]}]")
+        curr_date += timestep
+        print(f"# [inference] [step= {0}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={output:.2f}]")
             
         
             

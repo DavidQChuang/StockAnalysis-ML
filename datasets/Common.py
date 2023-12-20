@@ -98,11 +98,31 @@ class TimeSeriesDataset(Dataset):
     def __len__(self):
         return len(self.df) - self.seq_len - self.out_seq_len + 1
     
-    def __getitem__(self, index):
-        input = self.df[self.column_names][index: index + self.seq_len]
-        output = self.df['close'][index + self.seq_len: index + self.seq_len + self.out_seq_len]
+    def __getitem__(self, index) -> dict[str, np.ndarray]:
+        if -index <= self.out_seq_len:
+            raise IndexError('''There are not enough output data for this sequence; out_seq_len is greater than the number of remaining data points.
+                             Use .get(-x) instead if you want to get only inputs.''')
+        return self.get(index) # type: ignore ; return type is guaranteed
         
-        return { 'X': input.values, 'y': output.values }
+    def get(self, index) -> dict[str, np.ndarray | None]:
+        if index < 0:
+            # If index is -1, need special range indexer and output is None.
+            if index == -1:
+                input = self.df[self.column_names][-self.seq_len:]
+                output = None
+            else:
+                input = self.df[self.column_names][-self.seq_len + index + 1: -index + 1]
+                
+                # if not enough data for out_seq_len, output is None.
+                if -index <= self.out_seq_len:
+                    output = None
+                else:
+                    output = self.df['close'][-index + 1: -index + 1 + self.out_seq_len].values
+        else:
+            input = self.df[self.column_names][index: index + self.seq_len]
+            output = self.df['close'][index + self.seq_len: index + self.seq_len + self.out_seq_len].values
+        
+        return { 'X': input.values, 'y': output } # type: ignore ; output should be np.ndarray
 
 class AdvancedTimeSeriesDataset(TimeSeriesDataset):
     def __init__(self, df: pd.DataFrame, conf=None):

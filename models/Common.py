@@ -189,7 +189,7 @@ class StandardModel(ABC):
         pass
     
     @abstractmethod
-    def infer(self, X, scale_inputs=True, scale_outputs=True):
+    def infer(self, X, scale_inputs=True, scale_outputs=True) -> torch.Tensor:
         pass
     
     @abstractmethod
@@ -349,7 +349,7 @@ class PytorchModel(StandardModel):
             else:
                 input = X
                     
-            output = self.module.forward(torch.Tensor(input, device=self.device))
+            output = self.module.forward(torch.Tensor(input).to(self.device))
             
             if scale_outputs:
                 output = self.scale_output(output)
