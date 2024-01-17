@@ -207,6 +207,68 @@
                     "layer_count": 8
                 }
             }
+        },
+
+
+
+        "Daily-LSTM-TQQQ": {
+            "neptune": {
+                "name": "Daily-LSTM",
+                "with_id": "STOC-1",
+                "tags": [ "Intraday", "LSTM", "Stock" ]
+            },
+
+            "dataset_name": "alphavantage",
+            "dataset": {
+                "alphavantage": {
+                    "symbol": "TQQQ",
+
+                    "function": "TIME_SERIES_DAILY_ADJUSTED",
+                    "outputsize": "full"
+                },
+                "indicators": [
+                    {
+                        "function": "EMA",
+                        "period": 20,
+                        "is_input": true,
+                        "is_scaled": true
+                    },
+                    {
+                        "function": "MACD",
+                        "period": 26,
+                        "period2": 12,
+                        "is_input": true,
+                        "is_scaled": true
+                    },
+                    {
+                        "function": "delta_close",
+                        "is_input": true
+                    },
+                    {
+                        "function": "log_vol",
+                        "is_input": true
+                    }
+                ],
+                "columns": [
+                    { "name": "close", "is_scaled": true },
+                    { "name": "dt_hour", "is_scaled": true }
+                ]
+            },
+
+            "model_name": "SimpleLSTM",
+            "model": {
+                "epochs": 8,
+                "seq_len": 72,
+                "out_seq_len": 1,
+            
+                "hidden_layer_size": 256
+            },
+
+            "trader_name": "StandardTrader",
+            "trader": {
+                "episodes": 256,
+                "hidden_layer_size": 2048
+            }
         }
     }
 }
