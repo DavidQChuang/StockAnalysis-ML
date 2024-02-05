@@ -15,10 +15,11 @@ class TradingDataset(Dataset):
 
         real_len = inference_model.conf.seq_len
         infer_len = inference_model.conf.out_seq_len
+        columns = inference_model.conf.column_names
         self.real_len = real_len
 
         print(f'> Generating inference data:')
-        print(f'Inference model window: {real_len}+{infer_len}; Trader window: {real_len}+{infer_len}+{TradingSimulation.state_size()}')
+        print(f'Inference model window: {real_len}x{len(columns)}+{infer_len}; Trader window: {real_len}+{infer_len}+{TradingSimulation.state_size()}')
 
         device = torch.device(inference_model.device)
 
@@ -26,7 +27,7 @@ class TradingDataset(Dataset):
         batch_size = 64
         # Output window for the TSDataset is 0
         # since we won't need to cut datapoints from the end to use in loss functions.
-        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0, inference_model.conf.column_names), batch_size)
+        batch_data = DataLoader(TimeSeriesDataset(df, real_len, 0, columns), batch_size)
 
         bar_format = get_bar_format(len(batch_data), 1)
 
