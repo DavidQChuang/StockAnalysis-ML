@@ -23,7 +23,7 @@ class GatedMLPConfig:
         
     layer_count: int = 12
     layer_dropout: float = 0
-    embedding_length: int = 64
+    embedding_length: int = 32
     attention_size: int = 64
     
 class QKVAttention(nn.Module):
@@ -161,14 +161,18 @@ class DropoutLayers(nn.Module):
         return x
 
 class GatedMLP(nn.Module):
-    def __init__(self, model_json):
+    def __init__(self, model_json=None, gmlp: GatedMLPConfig|None=None, conf: ModelConfig|None=None):
         super().__init__()
         
-        if "gmlp" not in model_json:
-            raise Exception("'gmlp' key must be present in model.gmlp parameters.")
-        
-        gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
-        conf = ModelConfig.from_dict(model_json)
+        if model_json != None:
+            if "gmlp" not in model_json:
+                raise Exception("'gmlp' key must be present in model.gmlp parameters.")
+            
+            gmlp = GatedMLPConfig.from_dict(model_json['gmlp'])
+            conf = ModelConfig.from_dict(model_json)
+        else:
+            gmlp = gmlp if gmlp != None else GatedMLPConfig()
+            conf = conf if conf != None else ModelConfig()
         
         self.feature_count = feature_count = len(conf.columns)
         self.embedding_length = embedding_length = gmlp.embedding_length

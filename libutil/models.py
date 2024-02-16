@@ -44,7 +44,7 @@ def from_run(run_data, device=None, use_deepspeed=False, **kwargs) -> StandardMo
     network = None
     match model_name:
         case 'GatedMLP':
-            network = GatedMLP(model_json)
+            network = GatedMLP(model_json=model_json)
         case 'GatedCNN':
             network = GatedCNN(model_json)
         case 'SimpleLSTM':
