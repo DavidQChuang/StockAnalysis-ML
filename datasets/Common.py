@@ -99,9 +99,8 @@ class TimeSeriesDataset(Dataset):
         return len(self.df) - self.seq_len - self.out_seq_len + 1
     
     def __getitem__(self, index) -> dict[str, np.ndarray]:
-        if -index <= self.out_seq_len:
-            raise IndexError('''There are not enough output data for this sequence; out_seq_len is greater than the number of remaining data points.
-                             Use .get(-x) instead if you want to get only inputs.''')
+        # if index < 0 and -index <= self.out_seq_len:
+            # raise IndexError('There are not enough output data for this sequence; out_seq_len is greater than the number of remaining data points. Use .get(x) instead if you want to get only inputs.')
         return self.get(index) # type: ignore ; return type is guaranteed
         
     def get(self, index) -> dict[str, np.ndarray | None]:
@@ -111,8 +110,7 @@ class TimeSeriesDataset(Dataset):
                 input = self.df[self.column_names][-self.seq_len:]
                 output = None
             else:
-                input = self.df[self.column_names][-self.seq_len + index + 1: -index + 1]
-                
+                input = self.df[self.column_names][-self.seq_len + index + 1: index + 1]
                 # if not enough data for out_seq_len, output is None.
                 if -index <= self.out_seq_len:
                     output = None
