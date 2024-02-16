@@ -185,7 +185,7 @@ class StandardModel(ABC):
             return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
         
     @abstractmethod
-    def standard_train(self, dataset):
+    def standard_train(self, dataset, iter_callback=None, epoch_callback=None):
         pass
     
     @abstractmethod
@@ -356,7 +356,7 @@ class PytorchModel(StandardModel):
                 
             return output
     
-    def standard_train(self, dataset: TimeSeriesDataset):
+    def standard_train(self, dataset: TimeSeriesDataset, iter_callback=None, epoch_callback=None):
         if not isinstance(dataset, TimeSeriesDataset):
             raise TypeError("Dataset must be TimeSeriesDataset.")
         
@@ -436,6 +436,7 @@ class PytorchModel(StandardModel):
             module.train(True)
             train_loss = 0.0
             train_err = 0.0
+            train_err_max = 0.0
                     
             train_progress = tqdm(train_data, bar_format=bar_format)
             for train_iter, data in enumerate(train_progress):
@@ -447,48 +448,31 @@ class PytorchModel(StandardModel):
                 # print statistics
                 train_loss += loss.item()
                 if math.isnan(train_loss):
-                    print(">>> IN/OUT: ")
-                    print(X, Y_HAT)
-                    print()
-                    print()
-                    try:
-                        with torch.autograd.detect_anomaly():
-                            y = self.module.forward(X)
-                            torch.mean(y).backward()
-                    except Exception as e:
-                        print(e)
-                        
-                    print()
-                    print()
-                    print(">>> PARAMETERS: ")
-                    weights = optimizer.param_groups[0]['params']
-                    weights_flat = [torch.flatten(weight) for weight in weights]
-                    weights_1d = torch.cat(weights_flat)
-                    assert not torch.isnan(weights_1d).any()
-                    assert not torch.isinf(weights_1d).any()
-                    print(f"max params: {weights_1d.max()}, min: {weights_1d.min()}")
-                    
-                    grad_flat = [torch.flatten(weight.grad) for weight in weights if weight.grad != None]
-                    if grad_flat != []:
-                        grad_1d = torch.cat(grad_flat)
-                        assert not torch.isnan(grad_1d).any()
-                        assert not torch.isinf(grad_1d).any()
-                        print(f"max grad: {grad_1d.max()}, min: {grad_1d.min()}")
-                    
-                    for p in list(filter(lambda p: p.grad is not None, self.module.parameters())):
-                        print(p.grad.data.norm(2).item())
-                    
-                    # print("\nSaving failed model separately for debugging: ")
-                    # self.save("ckpt/fail_" + self.get_filename())
-                    raise ArithmeticError("Failed training, loss = NaN")
+                    self.print_debug_nan(X, Y_HAT, optimizer)
         
-                train_err += (torch.abs(y - Y_HAT)).mean().item()
+                err_vec = (torch.abs(y - Y_HAT))
+                train_err += err_vec.mean().item()
+                train_err_max = max(train_err_max, err_vec.max().item())
                 
                 loss = train_loss / (train_iter + 1)
                 err = self.scale_output(train_err / (train_iter + 1), delta=True) # accurate if loss < 1
+                
+                if iter_callback != None:
+                    iter_callback(**{
+                        "iter": train_iter,
+                        "x": X,
+                        "y": y,
+                        "y_hat": Y_HAT,
+                        "loss": loss,
+                        "err": err,
+                        "err_max": train_err_max,
+                    })
+                    
                 train_progress.set_postfix({
                     "loss": format_loss(loss),
-                    "err($)": format_loss(err)}, refresh=False)
+                    "err($)": format_loss(err),
+                    "err_max($)": format_loss(self.scale_output(train_err_max, delta=True)),
+                    }, refresh=False)
                 
             # Validate results
             module.eval()
@@ -615,10 +599,46 @@ class PytorchModel(StandardModel):
         print(self.runtime)
         print()
         
+    def print_debug_nan(self, X, Y_HAT, optimizer):
+        print(">>> IN/OUT: ")
+        print(X, Y_HAT)
+        print()
+        print()
+        try:
+            with torch.autograd.detect_anomaly():
+                y = self.module.forward(X)
+                torch.mean(y).backward()
+        except Exception as e:
+            print(e)
+            
+        print()
+        print()
+        print(">>> PARAMETERS: ")
+        weights = optimizer.param_groups[0]['params']
+        weights_flat = [torch.flatten(weight) for weight in weights]
+        weights_1d = torch.cat(weights_flat)
+        assert not torch.isnan(weights_1d).any()
+        assert not torch.isinf(weights_1d).any()
+        print(f"max params: {weights_1d.max()}, min: {weights_1d.min()}")
+        
+        grad_flat = [torch.flatten(weight.grad) for weight in weights if weight.grad != None]
+        if grad_flat != []:
+            grad_1d = torch.cat(grad_flat)
+            assert not torch.isnan(grad_1d).any()
+            assert not torch.isinf(grad_1d).any()
+            print(f"max grad: {grad_1d.max()}, min: {grad_1d.min()}")
+        
+        for p in list(filter(lambda p: p.grad is not None, self.module.parameters())):
+            print(p.grad.data.norm(2).item())
+        
+        # print("\nSaving failed model separately for debugging: ")
+        # self.save("ckpt/fail_" + self.get_filename())
+        raise ArithmeticError("Failed training, loss = NaN")
+        
 import deepspeed
         
 class DeepspeedModel(PytorchModel):
-    def __init__(self, module: StandardModel, model_json, device=None, verbosity=1):
+    def __init__(self, module: nn.Module, model_json, device=None, verbosity=1):
         super().__init__(module, model_json, device, verbosity=0)
         
         if 'deepspeed' not in model_json:

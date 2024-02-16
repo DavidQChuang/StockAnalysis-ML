@@ -12,8 +12,11 @@ import libutil.runs
 import libutil.datasets
 import libutil.models
 import libutil.traders
+from libutil.visualizer import VApp, VWorker, run_app, visualize_module
 
-def main():
+from models.GatedMLP import GatedMLP
+
+def main_cmd():
     parser = argparse.ArgumentParser(description='Args test')
     parser.add_argument('-r', '--run-name', type=str, dest='run_name',
                         help='Name of the run to use.')
@@ -48,6 +51,9 @@ def main():
     parser.add_argument('-ds', '--deepspeed', dest='use_deepspeed', action="store_true",
                         help='Enables deepspeed.')
 
+    parser.add_argument('-vs', '--visualizer', dest='use_visualizer', action="store_true",
+                        help='Enables visualizer.')
+
     parser.add_argument('-ei', '--eval-inference', dest='eval_inference_count', type=int,
                         help='Enables evaluation mode for inference. Gets the latest data and then runs the given number of inferences and prints them.')
 
@@ -57,6 +63,14 @@ def main():
 
     # Parse args
     args = parser.parse_args()
+    
+    # If using visualizer, enter the Qt event loop and let it run the program.
+    if args.use_visualizer == True:
+        run_app(lambda worker, app: main(args, worker, app))
+    else:
+        main(args)
+
+def main(args: argparse.Namespace, worker: VWorker|None = None, app: VApp|None = None):
     args_dict = vars(args)
         
     # Verbosity
@@ -91,7 +105,8 @@ def main():
         
         if not model.conf.epochs == 0:
             model_file = load_thing(model, args.model_file, args.rebuild_model)
-            model.standard_train(dataset)
+            model.standard_train(dataset,
+                None if worker == None else worker.iter_callback()) # type: ignore
             
             print(f"> Saving model to {model_file}")
             model.save(model_file)
@@ -144,16 +159,20 @@ def main():
         
         # Make and print inferences
         curr_date: datetime = dataset.df['timestamp'].iloc[-1] # when the inference occurs
-        curr_input: np.ndarray = dataset.get(-1)['X']   # type: ignore ; np array with input data
         
         # for i in range(args.eval_inference_count):
-        output = model.infer(curr_input).item()
         
-        print(f"# [inference] [step={-1}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={dataset.df['close'].iloc[-1]}]")
-        curr_date += timestep
-        print(f"# [inference] [step= {0}], Inference date: [date={curr_date.strftime(strftime_format)}], Value($): [val={output:.2f}]")
+        print(dataset.df)
+        
+        for i in range(-args.eval_inference_count, 1):
+            curr_input = dataset.get(i)['X']  # type: ignore ; np array with input data
+            output = model.infer(curr_input).item()
             
-        
+            if i != 0:
+                print(f"# [realvalue] [step={i}], Date: [date={curr_date.strftime(strftime_format)}], Value($): [val={dataset.df['close'].iloc[i]}]")
+            print(f"# [inference] [step={i}], Date: [date={curr_date.strftime(strftime_format)}], Value($): [val={output:.2f}]")
+            curr_date += timestep
+            
             
 def load_thing(model, model_file, rebuild_model):
     model_file = f"ckpt/{model.get_filename()}" if model_file == None else model_file
@@ -173,4 +192,4 @@ def load_thing(model, model_file, rebuild_model):
     return model_file
     
 if __name__ == "__main__":
-    main()
+    main_cmd()

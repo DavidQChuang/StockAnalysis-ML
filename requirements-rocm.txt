@@ -9,3 +9,4 @@ scikit_learn==1.2.2
 tqdm==4.65.0
 torch==2.0.1+rocm5.4.2
 torchvision==0.15.2+rocm5.4.2
+pyqtgraph==0.13.3
