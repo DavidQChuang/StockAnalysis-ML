@@ -197,7 +197,7 @@ class GatedMLP(nn.Module):
         
         # Layers
         self.stack = nn.Sequential(*layers) if gmlp.layer_dropout == 0 else DropoutLayers(layers, gmlp.layer_dropout)
-        self.unembed = nn.Linear(d_model, out_seq_len)
+        # self.unembed = nn.Linear(d_model, out_seq_len)
         
         self.lstm = nn.LSTM(d_model, d_ffn, batch_first=True)
         self.linear = nn.Sequential(
@@ -207,7 +207,7 @@ class GatedMLP(nn.Module):
             nn.Linear(d_ffn, 1)
         )
         
-        self.unproj = nn.Linear(seq_len, 1)
+        self.unproj = nn.Linear(seq_len, out_seq_len)
 
     def forward(self, x):
         # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
@@ -255,13 +255,13 @@ class GatedMLP(nn.Module):
         # -- Unencode
         # INPUT: x:                     (b, n, f*d)
         #        x = lstm(x):           (b, n, h)
-        # GET:   x = linear(x):         (b, n, 1)
+        # GET:   x = linear(x):         (b, n, o)
         x, hx = self.lstm(x)
         x = self.linear(x)
         
         # -- Unoffset
-        # INPUT: x:                     (b, n, 1)
-        # INPUT: input_offset:          (b, 1)
+        # INPUT: x:                     (b, n, o)
+        # INPUT: input_offset:          (b, o)
         # x = x.squeeze(-1) + (input_offset - output_offset)
         x = self.unproj(x.squeeze(-1))
         x = x + input_offset

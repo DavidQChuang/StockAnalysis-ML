@@ -98,7 +98,7 @@ class ModelConfig:
         '''
         Returns all column names where is_input is present and true.
         '''
-        return [ col['name'] for col in self.columns if 'is_scaled' in col and col['is_scaled'] ]
+        return [ col['name'] for col in self.columns if 'is_input' in col and col['is_input'] ]
     
     @property
     def model_filename(self):
@@ -129,12 +129,12 @@ class StandardModel(ABC):
         
         if fit:
             print('> Scaling and fitting dataset.')
-            print('Before: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
+            print('Before: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
         
             dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale]) # type: ignore ; this is matrixlike
         else:
             print('> Scaling dataset.')
-            print('Before: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
+            print('Before: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
             
             if not hasattr(self.scaler, 'mean_'):
                 raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run Model.scale_dataset(dataset, fit=True) first.")
@@ -185,7 +185,7 @@ class StandardModel(ABC):
             return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
         
     @abstractmethod
-    def standard_train(self, dataset, iter_callback=None, epoch_callback=None):
+    def standard_train(self, dataset, iter_callback=None, data_callback=None, epoch_callback=None):
         pass
     
     @abstractmethod
@@ -298,13 +298,13 @@ class PytorchModel(StandardModel):
         
         return optimizer
             
-    def single_train(self, X, Y_HAT, loss_func, optimizer):
+    def single_train(self, X, Y, loss_func, optimizer):
         """Performs a single forward and backward step with the optimizer and a loss calculation.
         Model should be in training mode before this is run.
 
         Args:
             X (torch.Tensor): Input vector, must be same device as module.
-            Y_HAT (torch.Tensor): Expected output vector, must be same device as module.
+            Y (torch.Tensor): Expected output vector, must be same device as module.
             loss_func (torch.nn._Loss): Loss function.
             optimizer (torch.optim.Optimizer): The optimizer, must be initialized with module.parameters.
 
@@ -315,16 +315,16 @@ class PytorchModel(StandardModel):
         self.module.zero_grad()
 
         # forward > backward > optimize
-        y    : torch.Tensor = self.module(X)
-        loss : torch.Tensor = loss_func.forward(y, Y_HAT)
+        y_hat : torch.Tensor = self.module(X)
+        loss  : torch.Tensor = loss_func.forward(y_hat, Y)
         
         if not math.isnan(loss.item()):
             loss.backward()
             optimizer.step()
         
-        return y, loss
+        return y_hat, loss
             
-    def single_infer(self, X, Y_HAT, loss_func):
+    def single_infer(self, X, Y, loss_func):
         """Performs a single inference and loss calculation with gradients off.
         Model should be in evaluation mode before this is run.
 
@@ -337,10 +337,10 @@ class PytorchModel(StandardModel):
             (torch.Tensor, torch.Tensor): The output value and the loss.
         """
         with torch.no_grad():
-            y    : torch.Tensor = self.module(X)
-            loss : torch.Tensor = loss_func.forward(y, Y_HAT)
+            y_hat : torch.Tensor = self.module(X)
+            loss  : torch.Tensor = loss_func.forward(y_hat, Y)
             
-            return y, loss
+            return y_hat, loss
     
     def infer(self, X, scale_inputs=True, scale_outputs=True):
         with torch.no_grad():
@@ -356,7 +356,7 @@ class PytorchModel(StandardModel):
                 
             return output
     
-    def standard_train(self, dataset: TimeSeriesDataset, iter_callback=None, epoch_callback=None):
+    def standard_train(self, dataset: TimeSeriesDataset, iter_callback=None, data_callback=None, epoch_callback=None):
         if not isinstance(dataset, TimeSeriesDataset):
             raise TypeError("Dataset must be TimeSeriesDataset.")
         
@@ -422,15 +422,15 @@ class PytorchModel(StandardModel):
             if self.pin_memory == True:
                 for data in tqdm(train, desc="Pinning", bar_format=bar_format):
                     X    : torch.Tensor = data["X"].float().to(self.device)
-                    Y_HAT: torch.Tensor = data["y"].float().to(self.device)
-                    train_data.append({ "X": X, "y": Y_HAT })
+                    Y    : torch.Tensor = data["y"].float().to(self.device)
+                    train_data.append({ "X": X, "y": Y })
             else:
                 # Putting the data in a list seems to be slightly faster than
                 # iterating over the dataset directly for some reason
                 for data in tqdm(train, desc="Pinning", bar_format=bar_format):
                     X    : torch.Tensor = data["X"]
-                    Y_HAT: torch.Tensor = data["y"]
-                    train_data.append({ "X": X, "y": Y_HAT })
+                    Y    : torch.Tensor = data["y"]
+                    train_data.append({ "X": X, "y": Y })
             
             # Train model
             module.train(True)
@@ -440,19 +440,26 @@ class PytorchModel(StandardModel):
                     
             train_progress = tqdm(train_data, bar_format=bar_format)
             for train_iter, data in enumerate(train_progress):
-                X, Y_HAT = data["X"], data["y"]
+                X, Y = data["X"], data["y"]
+
+                if data_callback != None:
+                    data_callback(**{
+                        "iter": train_iter,
+                        "x": X,
+                        "y": Y,
+                    })
 
                 # zero the parameter gradients
-                y, loss = self.single_train(X, Y_HAT, loss_func, optimizer)
+                y_hat, loss = self.single_train(X, Y, loss_func, optimizer)
 
                 # print statistics
                 train_loss += loss.item()
                 if math.isnan(train_loss):
-                    self.print_debug_nan(X, Y_HAT, optimizer)
+                    self.print_debug_nan(X, Y, optimizer)
         
-                err_vec = (torch.abs(y - Y_HAT))
+                err_vec = (torch.abs(y_hat - Y))
                 train_err += err_vec.mean().item()
-                train_err_max = max(train_err_max, err_vec.max().item())
+                train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), delta=True))
                 
                 loss = train_loss / (train_iter + 1)
                 err = self.scale_output(train_err / (train_iter + 1), delta=True) # accurate if loss < 1
@@ -460,18 +467,16 @@ class PytorchModel(StandardModel):
                 if iter_callback != None:
                     iter_callback(**{
                         "iter": train_iter,
-                        "x": X,
-                        "y": y,
-                        "y_hat": Y_HAT,
-                        "loss": loss,
+                        "y_hat": y_hat,
+                        # "loss": loss,
                         "err": err,
                         "err_max": train_err_max,
                     })
                     
                 train_progress.set_postfix({
-                    "loss": format_loss(loss),
+                    # "loss": format_loss(loss),
                     "err($)": format_loss(err),
-                    "err_max($)": format_loss(self.scale_output(train_err_max, delta=True)),
+                    "err_max($)": format_loss(train_err_max),
                     }, refresh=False)
                 
             # Validate results
@@ -483,12 +488,12 @@ class PytorchModel(StandardModel):
                 for valid_iter, data in enumerate(valid_progress):
                     if self.pin_memory:
                         X    : torch.Tensor = data["X"].float().to(self.device)
-                        Y_HAT: torch.Tensor = data["y"].float().to(self.device)
+                        Y    : torch.Tensor = data["y"].float().to(self.device)
                     else:
                         X    : torch.Tensor = data["X"]
-                        Y_HAT: torch.Tensor = data["y"]
+                        Y    : torch.Tensor = data["y"]
                     
-                    y, loss = self.single_infer(X, Y_HAT, loss_func)
+                    y_hat, loss = self.single_infer(X, Y, loss_func)
 
                     # print statistics
                     valid_loss += loss.item()
@@ -497,12 +502,13 @@ class PytorchModel(StandardModel):
                         self.save("ckpt/fail_" + self.get_filename())
                         raise ArithmeticError("Failed training, val_loss = NaN")
             
-                    valid_err += (torch.abs(y - Y_HAT)).mean().item()
+                    valid_err += (torch.abs(y_hat - Y)).mean().item()
                 
                     val_loss = valid_loss / (valid_iter + 1)
                     val_err = self.scale_output(valid_err / (valid_iter + 1), delta=True)
                     valid_progress.set_postfix({
-                        "val_loss": format_loss(val_loss), "val_err($)": format_loss(val_err) }, refresh=False)
+                        # "val_loss": format_loss(val_loss),
+                        "val_err($)": format_loss(val_err) }, refresh=False)
                 
             self.runtime['epoch'] += 1
                 
@@ -599,15 +605,15 @@ class PytorchModel(StandardModel):
         print(self.runtime)
         print()
         
-    def print_debug_nan(self, X, Y_HAT, optimizer):
+    def print_debug_nan(self, X, Y, optimizer):
         print(">>> IN/OUT: ")
-        print(X, Y_HAT)
+        print(X, Y)
         print()
         print()
         try:
             with torch.autograd.detect_anomaly():
-                y = self.module.forward(X)
-                torch.mean(y).backward()
+                y_hat = self.module.forward(X)
+                torch.mean(y_hat).backward()
         except Exception as e:
             print(e)
             
@@ -657,20 +663,20 @@ class DeepspeedModel(PytorchModel):
     def get_optimizer(self, model):
         return None
         
-    def single_train(self, X, Y_HAT, loss_func, optimizer):
-        y = self.model_engine(X)
-        loss = loss_func.forward(y, Y_HAT)
+    def single_train(self, X, Y, loss_func, optimizer):
+        y_hat = self.model_engine(X)
+        loss = loss_func.forward(y_hat, Y)
         
         self.model_engine.backward(loss)
         self.model_engine.step()
         
-        return y, loss
+        return y_hat, loss
         
-    def single_infer(self, X, Y_HAT, loss_func):
-        y = self.model_engine(X)
-        loss = loss_func.forward(y, Y_HAT)
+    def single_infer(self, X, Y, loss_func):
+        y_hat = self.model_engine(X)
+        loss = loss_func.forward(y_hat, Y)
         
-        return y, loss
+        return y_hat, loss
             
     def get_filename(self):
         return "ds-" + super().get_filename()

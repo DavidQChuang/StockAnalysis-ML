@@ -42,7 +42,7 @@ class DatasetConfig:
         '''
         Returns all column names where is_input is present and true.
         '''
-        return [ col['name'] for col in self.columns if 'is_scaled' in col and col['is_scaled'] ]
+        return [ col['name'] for col in self.columns if 'is_input' in col and col['is_input'] ]
     
 @dataclass
 class IndicatorConfig:
@@ -188,6 +188,8 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                     df['dt_hour'] = df['timestamp'].dt.hour
                 case 'dt_minute':
                     df['dt_minute'] = df['timestamp'].dt.minute
+                case 'dt_timestamp':
+                    df['dt_timestamp'] = df['timestamp'].astype(int)
         
         if self.conf.indicators != None:
             # print(df.iloc[0:5, :])

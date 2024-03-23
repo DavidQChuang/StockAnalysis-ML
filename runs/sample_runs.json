@@ -106,9 +106,9 @@
 
             "model_name": "SimpleLSTM",
             "model": {
-                "epochs": 8,
-                "seq_len": 72,
-                "out_seq_len": 1,
+                "epochs": 4,
+                "seq_len": 144,
+                "out_seq_len": 8,
             
                 "hidden_layer_size": 256
             },
@@ -131,13 +131,12 @@
             "copy_run": "Intra-LSTM-TQQQ",
             "model_name": "GatedMLP",
             "model": {
-                "epochs": 1,
-                "hidden_layer_size": 128,
+                "hidden_layer_size": 256,
                 "dropout_rate": 0.0,
                 "learning_rate": 0.001,
 
-                "seq_len": 72,
-                "out_seq_len": 1,
+                "seq_len": 144,
+                "out_seq_len": 4,
 
                 "precompile": false,
                 "pin_memory": true,

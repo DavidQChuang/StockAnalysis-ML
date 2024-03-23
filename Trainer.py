@@ -96,6 +96,9 @@ def main(args: argparse.Namespace, worker: VWorker|None = None, app: VApp|None =
     dataset = libutil.datasets.from_run(run_data, **args_dict)
     model = libutil.models.from_run(run_data, **args_dict)
     
+    if worker != None:
+        worker.sig_dataset.emit(dataset)
+    
     # Run mode
     if args.eval_inference_count == None: # and args.eval_trader_count == None:
         trader = libutil.traders.from_run(run_data, **args_dict)
@@ -106,7 +109,8 @@ def main(args: argparse.Namespace, worker: VWorker|None = None, app: VApp|None =
         if not model.conf.epochs == 0:
             model_file = load_thing(model, args.model_file, args.rebuild_model)
             model.standard_train(dataset,
-                None if worker == None else worker.iter_callback()) # type: ignore
+                iter_callback=None if worker == None else worker.iter_callback(),
+                data_callback=None if worker == None else worker.data_callback()) # type: ignore
             
             print(f"> Saving model to {model_file}")
             model.save(model_file)
