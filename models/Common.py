@@ -1,22 +1,20 @@
 from collections import defaultdict
 import os
 import time
+from sympy import preview
 from tqdm import tqdm
 
 from dataclasses import dataclass, field
 import inspect
 
-import pandas as pd
-import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
+from datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset, get_scaled_column_names, get_input_column_names
 import models.loss as loss
         
 import torch
 import math
 from torch import nn, optim, autocast
-from torch.utils import data
 from abc import ABC, abstractmethod
 
 def get_bar_format(dataset_len, batch_size):
@@ -59,9 +57,6 @@ class ModelConfig:
     loss        : str = "mean_squared_error"
     optimizer   : str = "adam"
 
-    test_split        : float = 0.1
-    validation_split  : float = 0.2
-    batch_size          : int = 64
     epochs              : int = 15
     
     learning_rate       : float = 0.001
@@ -81,6 +76,8 @@ class ModelConfig:
     indicators          : list[dict] = field(default_factory=lambda: []) 
     columns             : list[dict] = field(default_factory=lambda: [ { "name": "close" } ])
         
+    # TODO: convert shared data (between this and DatasetConfig) to an actual shared class
+    # to avoid code duplication
     @property
     def column_names(self):
         return [ col['name'] for col in self.columns ]
@@ -88,17 +85,16 @@ class ModelConfig:
     @property
     def scaled_column_names(self):
         '''
-        Returns all column names where is_scaled is not false or not present.
+        Returns all column names where is_scaled is true or not present (i.e. default if not present is true)
         '''
-        x =  [ col['name'] for col in self.columns if (not 'is_scaled' in col) or (col['is_scaled']) ]
-        return x
+        return get_scaled_column_names(self.columns)
     
     @property
     def input_column_names(self):
         '''
-        Returns all column names where is_input is present and true.
+        Returns all column names where is_input is present and true (i.e. default if not present is false)
         '''
-        return [ col['name'] for col in self.columns if 'is_input' in col and col['is_input'] ]
+        return get_input_column_names(self.columns)
     
     @property
     def model_filename(self):
@@ -118,72 +114,6 @@ class StandardModel(ABC):
             print(self.conf)
             print()
     
-    def print_validation_split(self, dataset_len):
-        train_ratio = 1-self.conf.validation_split
-        train_data = int(dataset_len*train_ratio)
-        
-        print(f"Splitting data at a {train_ratio} ratio: {train_data}/{dataset_len-train_data}")
-        
-    def scale_dataset(self, dataset: TimeSeriesDataset, fit=False):
-        columns_to_scale = self.conf.scaled_column_names
-        
-        if fit:
-            print('> Scaling and fitting dataset.')
-            print('Before: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
-        
-            dataset.df[columns_to_scale] = self.scaler.fit_transform(dataset.df[columns_to_scale]) # type: ignore ; this is matrixlike
-        else:
-            print('> Scaling dataset.')
-            print('Before: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
-            
-            if not hasattr(self.scaler, 'mean_'):
-                raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run Model.scale_dataset(dataset, fit=True) first.")
-            
-            dataset.df[columns_to_scale] = self.scaler.transform(dataset.df[columns_to_scale]) # type: ignore
-        
-        print('After: ', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
-        print()
-        
-        return dataset
-    
-    def scale_input(self, input, column='close', delta=False):
-        """
-        Scales an unscaled input x into the standard distribution this model was fitted to.\n
-        If the input is the difference between two unscaled inputs, set delta to True.
-            z = (x - u) / s
-        """
-            
-        if not hasattr(self.scaler, 'mean_'):
-            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run Model.scale_dataset(dataset, fit=True) first.")
-        
-        index = column
-        if type(column) is str:
-            index = self.conf.scaled_column_names.index(column)
-        
-        if delta == True:
-            return input / self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
-        else:
-            return (input - self.scaler.mean_[index]) / self.scaler.scale_[index] # type: ignore
-    
-    def scale_output(self, output, column: str|int ='close', delta=False):
-        """
-        Unscales a scaled output z into unscaled units.\n
-        If the input is the difference between two scaled outputs, set delta to True.
-            x = z * s + u
-        """
-            
-        if not hasattr(self.scaler, 'mean_'):
-            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. Run self.scale_dataset(dataset, fit=True) first.")
-        
-        index = column
-        if type(column) is str:
-            index = self.conf.scaled_column_names.index(column)
-        
-        if delta == True:
-            return output * self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
-        else:
-            return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
-        
     @abstractmethod
     def standard_train(self, dataset, iter_callback=None, data_callback=None, epoch_callback=None):
         pass
@@ -212,38 +142,58 @@ class StandardModel(ABC):
     @property
     def pin_memory(self):
         return (self.device != None and not self.device.startswith('cpu') and self.conf.pin_memory == True)
+    
+    @property
+    @abstractmethod 
+    def scaled_column_names(self):
+        pass
         
-    def get_training_data(self, dataset: TimeSeriesDataset):
-        validation_ratio = self.conf.validation_split
-        train_ratio = 1 - validation_ratio
-        
-        batch_size = self.conf.batch_size
-        
-        train_data, valid_data = data.random_split(dataset, [train_ratio, validation_ratio])
-        
-        #https://stackoverflow.com/questions/55563376/pytorch-how-does-pin-memory-work-in-dataloader
-        # If pinning, tensors on CPU remain in non-paged memory.
-        # This can speed up calls to Tensor.cuda()
-        #   and allows async calls with Tensor.cuda(non_blocking=True).
-        if self.pin_memory:
-            print("Pinning")
-            train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
-                                               shuffle=False, pin_memory=True)
-            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size,
-                                               shuffle=False, pin_memory=True)
-        # If not pinning, use the dataset collate_fn that converts data
-        #   in numpy form to tensors on the correct device.
+    def scale_input(self, input, column:str|int=0, delta=False):
+        """
+        Scales an unscaled input column x into the normalized distribution the given column was fitted to.\n
+        If the input is the difference between two unscaled inputs, set delta to True.
+            z = (x - u) / s
+        """
+            
+        if self.scaler is None or not hasattr(self.scaler, 'mean_') or self.scaled_column_names is None:
+            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. "+
+                               "self.scaler or scaled_column_names is None, or the scaler has not been fitted."+
+                               "Run TimeSeriesDataset.scale_dataset(scaler, columns_to_scale, fit=True) first.")
+            
+        # if column is str, convert to index
+        if type(column) is str:
+            index:int = self.scaled_column_names.index(column)
         else:
-            print("Unpinned")
-            train_dataloader = data.DataLoader(train_data, batch_size=batch_size,
-                                               collate_fn=dataset.get_collate_fn(device=self.device),
-                                               shuffle=False)
-            valid_dataloader = data.DataLoader(valid_data, batch_size=batch_size,
-                                               collate_fn=dataset.get_collate_fn(device=self.device),
-                                               shuffle=False)
+            index:int = column # type: ignore
         
-        return train_dataloader, valid_dataloader
+        if delta == True:
+            return input / self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
+        else:
+            return (input - self.scaler.mean_[index]) / self.scaler.scale_[index] # type: ignore
+    
+    def scale_output(self, output, column:str|int=0, is_delta=False):
+        """
+        Unscales a scaled output z corresponding to the given column into unscaled units.\n
+        If the input is the difference between two scaled outputs, set delta to True.
+            x = z * s + u
+        """
+            
+        if self.scaler is None or not hasattr(self.scaler, 'mean_') or self.scaled_column_names is None:
+            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. "+
+                               "self.scaler or scaled_column_names is None, or the scaler has not been fitted."+
+                               "Run TimeSeriesDataset.scale_dataset(scaler, columns_to_scale, fit=True) first.")
         
+        # if column is str, convert to index
+        if type(column) is str:
+            index:int = self.scaled_column_names.index(column)
+        else:
+            index:int = column # type: ignore
+        
+        if is_delta == True:
+            return output * self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
+        else:
+            return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
+
 class PytorchModel(StandardModel):
     runtime: dict | None
     
@@ -267,6 +217,10 @@ class PytorchModel(StandardModel):
         
         self.optimizer_state = None
         
+    @property
+    def scaled_column_names(self):
+        return self.conf.scaled_column_names
+        
     def get_model_name(self):
         return self.model_name
     
@@ -279,10 +233,12 @@ class PytorchModel(StandardModel):
             
             if func == 'mean_squared_error' or func == 'mse':
                 loss_instances.append(nn.MSELoss())
-            elif func == 'mean_absolute_directional' or func == 'mad':
+            elif func == 'mean_absolute_directional' or func == 'madl':
                 loss_instances.append(loss.MADLoss())
             elif func == 'smooth_l1_loss' or func == 'smooth_l1':
                 loss_instances.append(nn.SmoothL1Loss())
+            else:
+                raise Exception("Invalid loss function " + func)
                 
         if len(loss_funcs) == 1:
             return loss_instances[0]
@@ -355,6 +311,32 @@ class PytorchModel(StandardModel):
                 output = self.scale_output(output)
                 
             return output
+        
+    def transform_input(self, x, inplace=True):
+        # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
+        # Make sure x is shape (batch_size, seq_len, features)
+        # This unsqueezes x from (n) to (1, n, 1)
+        if len(x.shape) == 1:
+            x = x[None, :, None]
+        if len(x.shape) == 2:
+            # This unsqueezes x from (n, f) to (1, n, f)
+            x = x.unsqueeze(0)
+            
+        if not inplace:
+            x = x.clone()
+        
+        # Assume 'close' is the 1st column
+        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        # output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
+        
+        # -- Offset
+        # INPUT: x:                     (b, n, f)
+        # INPUT: input_offset:          (b, 1)
+        # Leave the 1st close value alone, since this will just set this to zero
+        x[:, :, 0] = x[:, :, 0] - input_offset
+        x[:, 0, 0] = input_offset
+        
+        return x
     
     def standard_train(self, dataset: TimeSeriesDataset, iter_callback=None, data_callback=None, epoch_callback=None):
         if not isinstance(dataset, TimeSeriesDataset):
@@ -367,12 +349,10 @@ class PytorchModel(StandardModel):
         
         # -- Setup
         use_cuda = self.device != None and self.device != "cpu"
-        module: nn.Module = self.module
+        module: nn.Module = self.module # type: ignore
 
         print(f'> Training model {self.get_model_name()}.')
         count_parameters(module)
-        print()
-        self.print_validation_split(len(dataset))
         print()
         
         # Runtime logging stuff
@@ -386,7 +366,7 @@ class PytorchModel(StandardModel):
         
         # Scale data (fit only if scaler is not already fit)
         should_fit_data = not hasattr(self.scaler, "mean_")
-        dataset = self.scale_dataset(dataset, should_fit_data) # dataset still numpy
+        dataset = dataset.scale_dataset(self.scaler, should_fit_data) # dataset still numpy
         if should_fit_data:
             self.runtime['columns'] = self.conf.column_names
             self.runtime['mean_'] = self.scaler.mean_
@@ -404,7 +384,7 @@ class PytorchModel(StandardModel):
         # Time realtime and cpu time
         start_time = time.time()
         pstart_time = time.process_time()
-        bar_format = get_bar_format(len(dataset), self.conf.batch_size)
+        bar_format = get_bar_format(len(dataset), dataset.batch_size)
         
         # -- Training
         for e in range(run_epochs):
@@ -415,7 +395,7 @@ class PytorchModel(StandardModel):
                 print(f"GPU: {torch.cuda.memory_allocated() / 1024**2:.2f}MB ", end='')
                 
             # Scramble data, this converts the numpy dataset into Tensors
-            train, valid = self.get_training_data(dataset)
+            train, valid = dataset.get_training_data(dataset.validation_split, pin_memory=True)
             
             # Pin memory
             train_data = []
@@ -427,7 +407,7 @@ class PytorchModel(StandardModel):
             else:
                 # Putting the data in a list seems to be slightly faster than
                 # iterating over the dataset directly for some reason
-                for data in tqdm(train, desc="Pinning", bar_format=bar_format):
+                for data in tqdm(train, desc="Preparing", bar_format=bar_format):
                     X    : torch.Tensor = data["X"]
                     Y    : torch.Tensor = data["y"]
                     train_data.append({ "X": X, "y": Y })
@@ -436,6 +416,7 @@ class PytorchModel(StandardModel):
             module.train(True)
             train_loss = 0.0
             train_err = 0.0
+            train_acc = 0.0
             train_err_max = 0.0
                     
             train_progress = tqdm(train_data, bar_format=bar_format)
@@ -459,22 +440,27 @@ class PytorchModel(StandardModel):
         
                 err_vec = (torch.abs(y_hat - Y))
                 train_err += err_vec.mean().item()
-                train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), delta=True))
+                train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), is_delta=True))
+                
+                # b, n, f
+                curr_x = X[:, -1, 0].unsqueeze(-1)
+                train_acc += (torch.sign((y_hat - curr_x) * (Y - curr_x)) > 0).sum().item() / y_hat.numel()
                 
                 loss = train_loss / (train_iter + 1)
-                err = self.scale_output(train_err / (train_iter + 1), delta=True) # accurate if loss < 1
+                acc = train_acc / (train_iter + 1)
+                err = self.scale_output(train_err / (train_iter + 1), is_delta=True) # accurate if loss < 1
                 
                 if iter_callback != None:
                     iter_callback(**{
                         "iter": train_iter,
                         "y_hat": y_hat,
-                        # "loss": loss,
                         "err": err,
                         "err_max": train_err_max,
                     })
                     
                 train_progress.set_postfix({
                     # "loss": format_loss(loss),
+                    "acc": format_loss(acc),
                     "err($)": format_loss(err),
                     "err_max($)": format_loss(train_err_max),
                     }, refresh=False)
@@ -483,6 +469,7 @@ class PytorchModel(StandardModel):
             module.eval()
             valid_loss = 0.0
             valid_err = 0.0
+            valid_acc = 0.0
             valid_progress = tqdm(valid, bar_format=bar_format)
             with torch.no_grad():
                 for valid_iter, data in enumerate(valid_progress):
@@ -502,12 +489,17 @@ class PytorchModel(StandardModel):
                         self.save("ckpt/fail_" + self.get_filename())
                         raise ArithmeticError("Failed training, val_loss = NaN")
             
+                    curr_x = X[:, -1, 0].unsqueeze(-1)
                     valid_err += (torch.abs(y_hat - Y)).mean().item()
+                    valid_acc += (torch.sign((y_hat - curr_x) * (Y - curr_x)) > 0).sum().item() / y_hat.numel()
                 
-                    val_loss = valid_loss / (valid_iter + 1)
-                    val_err = self.scale_output(valid_err / (valid_iter + 1), delta=True)
+                    # val_loss = valid_loss / (valid_iter + 1)
+                    val_err = self.scale_output(valid_err / (valid_iter + 1), is_delta=True)
+                    val_acc = valid_acc / (valid_iter + 1)
+                    
                     valid_progress.set_postfix({
                         # "val_loss": format_loss(val_loss),
+                        "val_acc": format_loss(val_acc),
                         "val_err($)": format_loss(val_err) }, refresh=False)
                 
             self.runtime['epoch'] += 1

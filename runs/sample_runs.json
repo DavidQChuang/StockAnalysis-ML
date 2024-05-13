@@ -11,12 +11,13 @@
 
             "scale_real_columns": [ ],
             "scale_categorical_columns": [ ],
-            "embed_integer_columns": [ ]
-        },
-        "model": {
+            "embed_integer_columns": [ ],
+
             "test_split": 0.1,
             "validation_split": 0.2,
-            "batch_size": 64,
+            "batch_size": 64
+        },
+        "model": {
             "epochs": 4,
             
             "hidden_layer_size": 128,
@@ -107,6 +108,7 @@
             "model_name": "SimpleLSTM",
             "model": {
                 "epochs": 4,
+                
                 "seq_len": 144,
                 "out_seq_len": 8,
             
@@ -133,7 +135,7 @@
             "model": {
                 "hidden_layer_size": 256,
                 "dropout_rate": 0.0,
-                "learning_rate": 0.001,
+                "learning_rate": 0.002,
 
                 "seq_len": 144,
                 "out_seq_len": 4,
@@ -143,7 +145,7 @@
 
                 "gmlp": {
                     "embedding_length": 32,
-                    "layer_count": 8
+                    "layer_count": 6
                 }
             },
             "trader": {
@@ -168,7 +170,7 @@
         "Intra-GMLP-MADL-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",
             "model": {
-                "loss": "mse + madl"
+                "loss": "madl"
             }
         },
         "Intra-GMLP-Testing-TQQQ": {

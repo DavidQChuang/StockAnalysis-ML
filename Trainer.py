@@ -102,6 +102,7 @@ def main(args: argparse.Namespace, worker: VWorker|None = None, app: VApp|None =
     # Run mode
     if args.eval_inference_count == None: # and args.eval_trader_count == None:
         trader = libutil.traders.from_run(run_data, **args_dict)
+        print()
         
         if not os.path.isdir("ckpt"):
             os.mkdir("ckpt")

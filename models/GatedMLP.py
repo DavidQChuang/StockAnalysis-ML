@@ -222,14 +222,16 @@ class GatedMLP(nn.Module):
             # This unsqueezes x from (b, n) to (b, n, 1)
             else:
                 x = x.unsqueeze(-1)
+        x = x.clone()
         
         # Assume 'close' is the 1st column
         input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
-        output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
+        # output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
         
         # -- Offset
         # INPUT: x:                     (b, n, f)
         # INPUT: input_offset:          (b, 1)
+        input_offset[:, 0] = 0
         x[:, :, 0] = x[:, :, 0] - input_offset
         
         # -- Positional encoding
@@ -264,6 +266,5 @@ class GatedMLP(nn.Module):
         # INPUT: input_offset:          (b, o)
         # x = x.squeeze(-1) + (input_offset - output_offset)
         x = self.unproj(x.squeeze(-1))
-        x = x + input_offset
         
         return x

@@ -1,5 +1,5 @@
 import unittest
-from datasets.Common import TimeSeriesDataset
+from datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
 from models.Common import PytorchModel
 
 from models.SimpleLSTM import SimpleLSTM
@@ -17,8 +17,12 @@ class TestStringMethods(unittest.TestCase):
             { "name": "close" },
             { "name": "volume" }
         ]})
-        dataset = TimeSeriesDataset(pd.DataFrame({'close': [1,2,3,4], 'volume': [300,400,500,200]}), column_names=['close', 'volume'])
-        dataset2 = TimeSeriesDataset(pd.DataFrame({'close': [1,2,3,4], 'volume': [300,400,500,200]}), column_names=['close', 'volume'])
+        dataset = TimeSeriesDataset(
+            pd.DataFrame({'close': [1,2,3,4], 'volume': [300,400,500,200]}),
+            column_names=['close', 'volume'])
+        dataset2 = TimeSeriesDataset(
+            pd.DataFrame({'close': [1,2,3,4], 'volume': [300,400,500,200]}),
+            column_names=['close', 'volume'])
         
         # Scale dataset and fit scaler
         model.scale_dataset(dataset, True)
@@ -42,6 +46,28 @@ class TestStringMethods(unittest.TestCase):
         # Should be same as the start
         self.assertEqual(unscaled1, dataset2.df.loc[0, "close"])
         self.assertEqual(unscaled2, dataset2.df.loc[0, "volume"])
+        
+    def test_data(self):
+        model = PytorchModel(nn.Linear(1,1), { 'columns': [
+            { "name": "close" },
+            { "name": "volume" }
+        ]})
+        
+        dataset = TimeSeriesDataset(
+            pd.DataFrame({'close': [1,2,3,4], 'volume': [300,400,500,200]}),
+            seq_len=2,
+            out_seq_len=2,
+            column_names=['close', 'volume'])
+        
+        model.scale_dataset(dataset, True)
+        
+        train, test = model.get_training_data(dataset)
+        for data in train:
+            X, Y = data["X"], data["y"]
+            
+            print(X[:, :, 0], Y)
+            print(model.scale_output(X[:, :, 0]), model.scale_output(Y))
+        
 
 if __name__ == '__main__':
     unittest.main()
