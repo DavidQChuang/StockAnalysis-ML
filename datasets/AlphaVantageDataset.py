@@ -51,10 +51,17 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
         df.drop(df.columns[0], axis=1, inplace=True)
         
         # Convert timestamps to np.datetime64
-        df.loc[:, 'timestamp'] = pd.to_datetime(df['timestamp'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
         
-        # Sort by timestamp
+        # Sort by timestamp in ascending order
         df = df.sort_values(by="timestamp")
+        
+        # Filter to standard hours
+        start_time = pd.to_datetime('09:30:00').time()
+        end_time = pd.to_datetime('16:00:00').time()
+
+        # Filter the DataFrame
+        df = df[df['timestamp'].dt.time.between(start_time, end_time)] # type: ignore
         
         # Remove duplicates by timestamp
         df, old_df = df.drop_duplicates(subset=['timestamp'], keep='first'), df
