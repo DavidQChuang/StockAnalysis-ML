@@ -15,7 +15,7 @@ fi
 
 if [[ ! -d "venv" ]]
 then
-    "$python_cmd" -m venv venv || echo "venv should be installed. Run 'pip install venv'."
+    "$python_cmd" -m venv venv || { echo "venv should be installed. Delete the venv directory and run 'pip install venv' before running this script again." ; exit 1; }
     source venv/bin/activate
     "$python_cmd" -m pip install -r requirements.txt
 fi
