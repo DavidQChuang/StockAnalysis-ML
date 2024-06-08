@@ -372,6 +372,8 @@ class PytorchModel(StandardModel):
             self.runtime['mean_'] = self.scaler.mean_
             self.runtime['var_'] = self.scaler.var_
             self.runtime['scale_'] = self.scaler.scale_
+            
+        print("> Target column for regression:", dataset.target)
         
         # Loss/optimizer functions
         loss_func = self.get_loss_func()
@@ -440,15 +442,14 @@ class PytorchModel(StandardModel):
         
                 err_vec = (torch.abs(y_hat - Y))
                 train_err += err_vec.mean().item()
-                train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), is_delta=True))
+                train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), column=dataset.target, is_delta=True))
                 
                 # b, n, f
-                curr_x = X[:, -1, 0].unsqueeze(-1)
-                train_acc += (torch.sign((y_hat - curr_x) * (Y - curr_x)) > 0).sum().item() / y_hat.numel()
+                train_acc += (torch.sign(y_hat * Y) > 0).sum().item() / y_hat.numel()
                 
                 loss = train_loss / (train_iter + 1)
                 acc = train_acc / (train_iter + 1)
-                err = self.scale_output(train_err / (train_iter + 1), is_delta=True) # accurate if loss < 1
+                err = self.scale_output(train_err / (train_iter + 1), column=dataset.target, is_delta=True) # accurate if loss < 1
                 
                 if iter_callback != None:
                     iter_callback(**{
@@ -489,12 +490,11 @@ class PytorchModel(StandardModel):
                         self.save("ckpt/fail_" + self.get_filename())
                         raise ArithmeticError("Failed training, val_loss = NaN")
             
-                    curr_x = X[:, -1, 0].unsqueeze(-1)
                     valid_err += (torch.abs(y_hat - Y)).mean().item()
-                    valid_acc += (torch.sign((y_hat - curr_x) * (Y - curr_x)) > 0).sum().item() / y_hat.numel()
+                    valid_acc += (torch.sign(y_hat * Y) > 0).sum().item() / y_hat.numel()
                 
                     # val_loss = valid_loss / (valid_iter + 1)
-                    val_err = self.scale_output(valid_err / (valid_iter + 1), is_delta=True)
+                    val_err = self.scale_output(valid_err / (valid_iter + 1), column=dataset.target, is_delta=True)
                     val_acc = valid_acc / (valid_iter + 1)
                     
                     valid_progress.set_postfix({

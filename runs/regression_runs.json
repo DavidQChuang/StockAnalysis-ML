@@ -71,7 +71,7 @@
                     "symbol": "TQQQ",
 
                     "function": "TIME_SERIES_INTRADAY",
-                    "months": "-8",
+                    "months": "-24",
                     "interval": "5min",
                     "outputsize": "full",
                     "extended_hours": false
@@ -92,6 +92,10 @@
                     },
                     {
                         "function": "delta",
+                        "is_input": true
+                    },
+                    {
+                        "function": "log_vol",
                         "is_input": true
                     },
                     {
@@ -124,14 +128,7 @@
                 "hidden_layer_size": 2048
             }
         },
-        "Intra-Ext-LSTM-TQQQ": {
-            "copy_run": "Intra-LSTM-TQQQ",
-            "dataset": {
-                "alphavantage": {
-                    "months": "-24"
-                }
-            }
-        },
+
         "Intra-GMLP-TQQQ": {
             "copy_run": "Intra-LSTM-TQQQ",
             "model_name": "GatedMLP",
@@ -156,32 +153,11 @@
                 "hidden_layer_size": 2048
             }
         },
-        "Intra-GMLP128-TQQQ": {
-            "copy_run": "Intra-GMLP-TQQQ",
-            "model": {
-                "epochs": 16,
-                "hidden_layer_size": 128
-            }
-        },
-        "Intra-GMLP256-TQQQ": {
-            "copy_run": "Intra-GMLP-TQQQ",
-            "model": {
-                "epochs": 24,
-                "hidden_layer_size": 256
-            }
-        },
         "Intra-GMLP-MADL-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",
-            "model": {
-                "loss": "mse + madl"
-            }
+            "model": { "loss": "mse + madl" }
         },
-        "Intra-GMLP-Testing-TQQQ": {
-            "copy_run": "Intra-GMLP-TQQQ",
-            "model": {
-                "epochs": 1
-            }
-        },
+
         "Intra-GCNN-TQQQ": {
             "copy_run": "Intra-GMLP-TQQQ",
             "model_name": "GatedCNN",
@@ -193,27 +169,6 @@
                 "layer_count": 4
             }
         },
-        "Intra-GCNN-Testing-TQQQ": {
-            "copy_run": "Intra-GMLP-TQQQ",
-            "model_name": "GatedCNN",
-            "model": {
-                "epochs": 1
-            }
-        },
-        "Intra-Ext-GMLP-TQQQ": {
-            "copy_run": "Intra-Ext-LSTM-TQQQ",
-            "model_name": "GatedMLP",
-            "model": {
-                "epochs": 12,
-                "hidden_layer_size": 128,
-                "gmlp": {
-                    "embedding_length": 128,
-                    "layer_count": 8
-                }
-            }
-        },
-
-
 
         "Daily-LSTM-TQQQ": {
             "neptune": {

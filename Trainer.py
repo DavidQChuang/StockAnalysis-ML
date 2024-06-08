@@ -12,7 +12,6 @@ import libutil.runs
 import libutil.datasets
 import libutil.models
 import libutil.traders
-from libutil.visualizer import VApp, VWorker, run_app, visualize_module
 
 from models.GatedMLP import GatedMLP
 
@@ -66,11 +65,12 @@ def main_cmd():
     
     # If using visualizer, enter the Qt event loop and let it run the program.
     if args.use_visualizer == True:
+        from libutil.visualizer import VApp, VWorker, run_app, visualize_module
         run_app(lambda worker, app: main(args, worker, app))
     else:
         main(args)
 
-def main(args: argparse.Namespace, worker: VWorker|None = None, app: VApp|None = None):
+def main(args: argparse.Namespace, worker= None, app= None):
     args_dict = vars(args)
         
     # Verbosity

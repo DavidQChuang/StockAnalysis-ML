@@ -35,6 +35,8 @@ class DatasetConfig:
     validation_split  : float = 0.2
     batch_size          : int = 64
     
+    target      : str = "close"
+    
     @property
     def column_names(self):
         return [ col['name'] for col in self.columns ]
@@ -89,11 +91,13 @@ class IndicatorConfig:
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, df: pd.DataFrame,
+                 target="close",
                  seq_len=0, out_seq_len=0,
                  test_split=0.1, validation_split=0.2,
                  batch_size=64,
                  column_names: list[str]=None, scaled_column_names: list[str]=None):
         self.df: pd.DataFrame = df
+        self._target = target
         self._seq_len = seq_len
         self._out_seq_len = out_seq_len
         self._column_names = column_names
@@ -107,6 +111,10 @@ class TimeSeriesDataset(Dataset):
         if self.column_names == None or len(self.column_names) == 0:
             raise Exception("Dataset was given no column names to use as input.")
         
+    @property
+    def target(self)-> str:
+        return self._target
+    
     @property
     def seq_len(self) -> int:
         return self._seq_len
@@ -165,10 +173,10 @@ class TimeSeriesDataset(Dataset):
                 if -index <= self.out_seq_len:
                     output = None
                 else:
-                    output = self.df['close'][-index + 1: -index + 1 + self.out_seq_len].values
+                    output = self.df[self.target][-index + 1: -index + 1 + self.out_seq_len].values
         else:
             input = self.df[self.column_names][index: index + self.seq_len]
-            output = self.df['close'][index + self.seq_len: index + self.seq_len + self.out_seq_len].values
+            output = self.df[self.target][index + self.seq_len: index + self.seq_len + self.out_seq_len].values
         
         return { 'X': input.values, 'y': output } # type: ignore ; output should be np.ndarray
     
@@ -209,56 +217,11 @@ class TimeSeriesDataset(Dataset):
             dataset.df[columns_to_scale] = scaler.transform(dataset.df[columns_to_scale]) # type: ignore
         
         print('After: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
-        print('Sanity check (should be equal to first close value): ', self.scale_output(dataset.df['close'].iloc[0]))
+        print('Sanity check (should be equal to first close value): ',
+              (dataset.df['close'].iloc[0] * self.scaler.scale_[0] + self.scaler.mean_[0]))
         print()
         
         return dataset
-
-    def scale_input(self, input, column:str|int=0, delta=False):
-        """
-        Scales an unscaled input column x into the normalized distribution the given column was fitted to.\n
-        If the input is the difference between two unscaled inputs, set delta to True.
-            z = (x - u) / s
-        """
-            
-        if self.scaler is None or not hasattr(self.scaler, 'mean_') or self.scaled_column_names is None:
-            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. "+
-                               "self.scaler or scaled_column_names is None, or the scaler has not been fitted."+
-                               "Run TimeSeriesDataset.scale_dataset(scaler, columns_to_scale, fit=True) first.")
-            
-        # if column is str, convert to index
-        if type(column) is str:
-            index:int = self.scaled_column_names.index(column)
-        else:
-            index:int = column # type: ignore
-        
-        if delta == True:
-            return input / self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
-        else:
-            return (input - self.scaler.mean_[index]) / self.scaler.scale_[index] # type: ignore
-    
-    def scale_output(self, output, column:str|int=0, is_delta=False):
-        """
-        Unscales a scaled output z corresponding to the given column into unscaled units.\n
-        If the input is the difference between two scaled outputs, set delta to True.
-            x = z * s + u
-        """
-            
-        if self.scaler is None or not hasattr(self.scaler, 'mean_') or self.scaled_column_names is None:
-            raise RuntimeError("Scaler must be fitted before being used to scale/unscale input. "+
-                               "self.scaler or scaled_column_names is None, or the scaler has not been fitted."+
-                               "Run TimeSeriesDataset.scale_dataset(scaler, columns_to_scale, fit=True) first.")
-        
-        # if column is str, convert to index
-        if type(column) is str:
-            index:int = self.scaled_column_names.index(column)
-        else:
-            index:int = column # type: ignore
-        
-        if is_delta == True:
-            return output * self.scaler.scale_[index] # type: ignore ; if the scaler has mean_ it should have everything else too
-        else:
-            return output * self.scaler.scale_[index] + self.scaler.mean_[index] # type: ignore
         
     def get_training_data(self, validation_ratio:float, batch_size:int|None=None, pin_memory=False, device='cpu'):
         dataset = self
@@ -328,7 +291,7 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                         ind_values = indicators.get_series_log_vol(df['volume'])
                         values_to_remove = 0
                         
-                    case 'DELTA_CLOSE':
+                    case 'DELTA':
                         ind_values = df['close'].diff()
                         values_to_remove = 1
                             
@@ -369,6 +332,7 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
             
         self.df: pd.DataFrame = df
         super().__init__(self.df,
+                         self.conf.target,
                          self.conf.seq_len,
                          self.conf.out_seq_len,
                          self.conf.test_split,
