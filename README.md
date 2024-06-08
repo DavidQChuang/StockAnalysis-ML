@@ -87,11 +87,30 @@ Splitting data at a 0.8 ratio: 25231/6307
 ## Extra: AMD ROCm installation on Ubuntu 22.04
 This worked on AMD Instinct MI25 (`gfx900`)
 ### Installing AMDGPU
-    wget https://repo.radeon.com/amdgpu-install/22.40/ubuntu/jammy/amdgpu-install_5.4.50401-1_all.deb
-    sudo apt install ./amdgpu-install_5.4.50401-1_all.deb
-    sudo amdgpu-install --accept-eula --usecase=rocm,workstation -y --vulkan=pro --opencl=rocr,legacy --rocmrelease=5.4.2
+The version I used is 5.4.2, which technically doesn't support the MI25. However, it still seems to work for me, and for a couple other MI25 owners. The last version supporting the MI25 was 4.5.2, which is very old and not supported by PyTorch 2.x.<br>
+
+First of all, make sure the kernel is the right version. The kernel version has long since updated past what ROCm 5.4.2 supports, so you may have to downgrade to 5.15, or whatever kernel version your ROCm supports. See the [ROCm wiki](https://rocm.docs.amd.com/en/docs-5.4.2/release/gpu_os_support.html) for details.
+
+    sudo apt install --install-recommends linux-generic
+
+    # Verify you got the right version - for me, `Ubuntu, with Linux 5.15.0-112-generic` appeared in this list.
+    # This shows entries for the GRUB menu.
+    sudo grep 'menuentry \|submenu ' /boot/grub/grub.cfg | cut -f2 -d "'"
+
+Now, download and run the driver install script. The --no-dkms option is very important here. For some reason, the GPUs don't get detected (nor does the amdgpu module even attempt to load) when the dkms driver is present. 
+
+    # change 'jammy' to 'focal' for ubuntu 20.x
+    wget https://repo.radeon.com/amdgpu-install/5.4.2/ubuntu/jammy/amdgpu-install_5.4.50402-1_all.deb
+    sudo apt install ./amdgpu-install_5.4.50402-1_all.deb
+    sudo amdgpu-install --usecase=rocm -y --no-dkms
+    
 ### Installing ROCm PyTorch
+Run the below to install PyTorch for ROCm 5.4.2. PyTorch 2.0.0 and 2.0.1 support ROCm 5.4.2, so we'll use the latest one. The PyTorch website lists all PyTorch versions, as well as the supported ROCm version (under Wheel->Linux and Windows for each PyTorch version). If you upgrade ROCm (and it works), you should be able to upgrade this as well. https://pytorch.org/get-started/previous-versions/
+
     pip install torch==2.0.1+rocm5.4.2 torchvision==0.15.2+rocm5.4.2 --index-url https://download.pytorch.org/whl/rocm5.4.2
+
+Then, reboot and in GRUB, select the new kernel version, and run `sudo apt-get autoremove --purge` to remove old kernel versions. This will leave a fallback kernel, so you should install two older kernel versions (keep one as a backup), and remove all of the newer ones. `amdgpu-dkms` will try to compile for every installed kernel version, and will fail if any unsupported kernel versions are present.
+
 ### Installing random libraries for DeepSpeed/ROCm not included in Ubuntu
     sudo apt install libstdc++-12-dev libopenmpi-dev libaio-dev rocthrust-dev hipsparse-dev rocblas-dev
 ### Fix for ROCm torch.compile error:
