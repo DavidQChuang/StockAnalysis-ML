@@ -210,28 +210,6 @@ class GatedMLP(nn.Module):
         self.unproj = nn.Linear(seq_len, out_seq_len)
 
     def forward(self, x):
-        # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
-        # Make sure x is shape (batch_size, seq_len, features)
-        # This unsqueezes x from (n) to (1, n, 1)
-        if len(x.shape) == 1:
-            x = x[None, :, None]
-        if len(x.shape) == 2:
-            # This unsqueezes x from (n, f) to (1, n, f)
-            if x.shape[1] == self.feature_count:
-                x = x.unsqueeze(0)
-            # This unsqueezes x from (b, n) to (b, n, 1)
-            else:
-                x = x.unsqueeze(-1)
-        
-        # Assume 'close' is the 1st column
-        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
-        output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
-        
-        # -- Offset
-        # INPUT: x:                     (b, n, f)
-        # INPUT: input_offset:          (b, 1)
-        x[:, :, 0] = x[:, :, 0] - input_offset
-        
         # -- Positional encoding
         # INPUT: x:                     (b, n, f)
         # INPUT: positional_encoding:   (n, d)
@@ -264,6 +242,31 @@ class GatedMLP(nn.Module):
         # INPUT: input_offset:          (b, o)
         # x = x.squeeze(-1) + (input_offset - output_offset)
         x = self.unproj(x.squeeze(-1))
-        x = x + input_offset
         
+        return x
+    
+    def legacy_offset(self, x):
+        # b: batch_size, n: seq_len, f: features, d: embedding_size, o: output_size, h: d_ffn
+        # Make sure x is shape (batch_size, seq_len, features)
+        # This unsqueezes x from (n) to (1, n, 1)
+        if len(x.shape) == 1:
+            x = x[None, :, None]
+        if len(x.shape) == 2:
+            # This unsqueezes x from (n, f) to (1, n, f)
+            if x.shape[1] == self.feature_count:
+                x = x.unsqueeze(0)
+            # This unsqueezes x from (b, n) to (b, n, 1)
+            else:
+                x = x.unsqueeze(-1)
+        x = x.clone()
+        
+        # Assume 'close' is the 1st column
+        input_offset = x[:, 0, 0].unsqueeze(-1).clone().detach()
+        # output_offset = x[:, -1, 0].unsqueeze(-1).clone().detach()
+        
+        # -- Offset
+        # INPUT: x:                     (b, n, f)
+        # INPUT: input_offset:          (b, 1)
+        input_offset[:, 0] = 0
+        x[:, :, 0] = x[:, :, 0] - input_offset
         return x

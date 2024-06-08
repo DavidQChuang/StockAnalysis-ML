@@ -184,7 +184,7 @@ class VApp(QtWidgets.QMainWindow):
         self.update_price_graph(self.price_data, self.price_real_data, y_hat)
         
     def update_price_graph(self, x, y, y_hat):
-        close_idx = self.dataset.column_names.index("close")
+        target_idx = self.dataset.column_names.index(self.dataset.target)
         # print(close_idx)
         # raise "x"
         
@@ -193,11 +193,11 @@ class VApp(QtWidgets.QMainWindow):
         if x is not self.price_data:
             self.price_data = x
             
-            # get sequence of closing prices in [batch 0, (all rows), feature 0]
-            close_data = x[0, -50:, close_idx]
+            # get sequence of closing prices in [batch 0, (all rows), target feature]
+            close_data = x[0, -50:, target_idx]
             
             price_data_len = len(close_data)
-            last_close_price = x[0, -1, close_idx]
+            last_close_price = x[0, -1, target_idx]
             
             # Render historical prices
             self.price_graph.setData(x=range(price_data_len), y=close_data)
@@ -210,7 +210,7 @@ class VApp(QtWidgets.QMainWindow):
                 self.macd_graph.setOpts(x=range(price_data_len), height=macd_data, brushes=colors)
         else:
             price_data_len = len(self.price_data[0, -50:])
-            last_close_price = self.price_data[0, -1, close_idx]
+            last_close_price = self.price_data[0, -1, target_idx]
             
         if y is not self.price_real_data and self.price_data is not None:
             self.price_real_data = y
