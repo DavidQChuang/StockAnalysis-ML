@@ -3,17 +3,14 @@ from datetime import datetime, timedelta
 import numpy as np
 from pytz import timezone
 
-import random
 import os
-import sys
 import traceback
+import torch
 
 import libutil.runs
 import libutil.datasets
 import libutil.models
 import libutil.traders
-
-from models.GatedMLP import GatedMLP
 
 def main_cmd():
     parser = argparse.ArgumentParser(description='Args test')
@@ -55,6 +52,9 @@ def main_cmd():
 
     parser.add_argument('-ei', '--eval-inference', dest='eval_inference_count', type=int,
                         help='Enables evaluation mode for inference. Gets the latest data and then runs the given number of inferences and prints them.')
+
+    parser.add_argument('-da', '--detect-anomaly', dest='detect_anomaly', action="store_true",
+                        help='Sets torch.autograd.set_detect_anomaly(True). Helps to debug anomalies in gradient calculation.')
 
     # parser.add_argument('-et', '--eval-trader', dest='eval_trader_count', type=int,
     #                     help="""Enables evaluation mode for trading. Gets the latest data and then runs the given number of inferences, then runs the trader and prints
@@ -98,6 +98,10 @@ def main(args: argparse.Namespace, worker= None, app= None):
     
     if worker != None:
         worker.sig_dataset.emit(dataset)
+        
+    # If detect anomaly on:
+    if args.detect_anomaly:
+        torch.autograd.set_detect_anomaly(True)
     
     # Run mode
     if args.eval_inference_count == None: # and args.eval_trader_count == None:

@@ -285,7 +285,7 @@ class PytorchModel(StandardModel):
         Model should be in evaluation mode before this is run.
 
         Args:
-            X (torch.Tensor): Input vector, must be same device as module.
+            X (torch.Tensor): Input vector, must be same device as module.t
             Y_HAT (torch.Tensor): Expected output vector, must be same device as module.
             loss_func (torch.nn._Loss): Loss function.
 
@@ -447,22 +447,22 @@ class PytorchModel(StandardModel):
                 # b, n, f
                 train_acc += (torch.sign(y_hat * Y) > 0).sum().item() / y_hat.numel()
                 
-                loss = train_loss / (train_iter + 1)
-                acc = train_acc / (train_iter + 1)
-                err = self.scale_output(train_err / (train_iter + 1), column=dataset.target, is_delta=True) # accurate if loss < 1
+                disp_loss = train_loss / (train_iter + 1)
+                disp_acc = train_acc / (train_iter + 1)
+                disp_err = self.scale_output(train_err / (train_iter + 1), column=dataset.target, is_delta=True) # accurate if loss < 1
                 
                 if iter_callback != None:
                     iter_callback(**{
                         "iter": train_iter,
                         "y_hat": y_hat,
-                        "err": err,
+                        "err": disp_err,
                         "err_max": train_err_max,
                     })
                     
                 train_progress.set_postfix({
-                    # "loss": format_loss(loss),
-                    "acc": format_loss(acc),
-                    "err($)": format_loss(err),
+                    # "loss": format_loss(disp_loss),
+                    "acc": format_loss(disp_acc),
+                    "err($)": format_loss(disp_err),
                     "err_max($)": format_loss(train_err_max),
                     }, refresh=False)
                 
