@@ -45,7 +45,7 @@ By default, the model will determine a filename automatically based on architect
 `-rm, --rebuild-model`: If true then overwrites old model and starts from scratch.
 Default behavior is to continue training with the existing checkpoint.
 
-`-d, --device`: Specifies the device to use. Possible values: `cpu`, `cuda`.
+`-d, --device`: Specifies the device to use. Possible values: `cpu`, `cuda`, `mps`.
 
 `-ds, --deepspeed`: Uses Deepspeed to train the model instead of classic PyTorch. Deepspeed can also be used by using `Deepspeed[ModelName]` as the `model_name` in a run.
 
