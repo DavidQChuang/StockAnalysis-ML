@@ -2,7 +2,7 @@ import calendar
 import pytz
 from tqdm import tqdm
 
-from .Common import DatasetConfig, IndicatorConfig, AdvancedTimeSeriesDataset
+from datasets.datasources import Datasource, DatasourceConfig
 
 import os
 import re
@@ -10,40 +10,33 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
-class AlphaVantageDataset(AdvancedTimeSeriesDataset):
-    def __init__(self, dataset_json):
-        df = self.get_dataframe(dataset_json)
+class AlphaVantageDatasource(Datasource):
+    def get_dataframe(self, datasource_json: dict, config: DatasourceConfig, force_overwrite=False) -> pd.DataFrame:
+        url = "https://www.alphavantage.co/query?"
         
-        super().__init__(df, conf=DatasetConfig.from_dict(dataset_json))
-        
-    
-    def get_dataframe(self, dataset_json, forceOverwrite=False):
-        
-        if 'alphavantage' not in dataset_json:
+        if 'alphavantage' not in datasource_json:
             raise Exception("'alphavantage' key must be present in dataset parameters.")
         
-        query_params = dataset_json['alphavantage']
+        query_params = datasource_json['alphavantage']
         
-        # If multiple months, get the months
-        if 'months' in query_params:
-            if isinstance(query_params['months'], list):
-                months = query_params['months']
-                del query_params['months']
-            else:
-                months = query_params['months']
-                del query_params['months']
-        else:
-            months = [ None ]
+        # Make sure apikey is present
+        self._get_param(query_params, 'apikey', required=True)
             
-        if 'dir' in query_params:
-            dfs = []
+        # Recursively get all combinations of dataframe parameters and retrieve all needed CSVs
+        # Get time in EST
+        current_datetime = datetime.now(pytz.timezone("America/New_York"))
+        current_date = current_datetime.date()
+        
+        # If the day hasn't ended yet, AlphaVantage hasn't updated for the current day.
+        if current_datetime.hour < 16:
+            current_date -= timedelta(days=1)
+        
+        dfs = []
+        
+        for url, filename in tqdm(self.get_urls(current_date, **query_params), "Downloading from AlphaVantage", ncols=80):
+            df = self.download_csv(url, filename, force_overwrite)
+            dfs.append(df)
             
-            filenames = [ self.get_filename(query_params, month, query_params['dir']) for month in months ]
-            for file in filenames:
-                dfs.append(pd.read_csv(file))
-        else:
-            dfs = self.download_files(query_params, months, forceOverwrite)
-                
         # Combine the dfs, dropping original index
         df = pd.concat(dfs, ignore_index=True)
         
@@ -56,12 +49,10 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
         # Sort by timestamp in ascending order
         df = df.sort_values(by="timestamp")
         
-        # Filter to standard hours
-        start_time = pd.to_datetime('09:30:00').time()
-        end_time = pd.to_datetime('16:00:00').time()
-
-        # Filter the DataFrame
-        df = df[df['timestamp'].dt.time.between(start_time, end_time)] # type: ignore
+        # # Filter to standard hours
+        # start_time = pd.to_datetime('09:30:00').time()
+        # end_time = pd.to_datetime('16:00:00').time()
+        # df = df[df['timestamp'].dt.time.between(start_time, end_time)] # type: ignore
         
         # Remove duplicates by timestamp
         df, old_df = df.drop_duplicates(subset=['timestamp'], keep='first'), df
@@ -72,50 +63,69 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
         df = df.reset_index(drop=True)
         
         return df
-    
-    def download_files(self, query_params, months=[None], forceOverwrite=False):
-        if 'apikey' not in query_params:
-            raise Exception("'apikey' key must be present in dataset.alphavantage parameters.")
 
+        
+    # param getter helper
+    def _get_param(self, query_params, param, required):
+        if param in query_params:
+            return query_params[param]
+        elif not required:
+            return ""
+        else:
+            raise Exception(f"'{param}' key must be present in dataset.alphavantage parameters.")
+        
+    def _process_multi_params(self, _param_name, _required, _current_date, **query_params):
+        param = self._get_param(query_params, _param_name, _required)
+        
+        # if param is list, run get_dataframe_urls for each param
+        if isinstance(param, list):
+            # Get a copy of query_params ...
+            query_params_copy = query_params.copy()
+            urls = []
+            
+            # ... and replace the param list with a single value for each value in the list
+            for each_value in param:
+                query_params_copy[_param_name] = each_value
+                urls += self.get_urls(**query_params_copy)
+            return urls
+        
+        # Return single param
+        return param
+        
+    def get_urls(self, _current_date, **query_params):
+        # Process multiparams
+        function = self._process_multi_params('function', True, _current_date, **query_params)
+        if isinstance(function, list):
+            return function
+        
+        # If intraday process extra intraday parameters
+        if function == 'TIME_SERIES_INTRADAY':
+            # Special case if month is '-[months]', generate a list of the past [months] months in YYYY-MM format.
+            if 'month' in query_params and isinstance(query_params['month'], str):
+                month = query_params['month']
+                if month[0] == '-':
+                    first_month = int(month)
+                    query_params['month'] = [ self.get_month(i, _current_date) for i in range(first_month, 1) ]
+            
+            month = self._process_multi_params('month', False, _current_date, **query_params)
+            if isinstance(month, list):
+                return month
+            
+            interval = self._process_multi_params('interval', True, _current_date, **query_params)
+            if isinstance(interval, list):
+                return interval
+        
+        # Base case - get url & filename
         url = "https://www.alphavantage.co/query?"
         url += urlencode(query_params)
         
-        dfs = []
+        # Used for file naming purposes, if the full month is present, YYYY-MM, else
+        # YYYY-MM-DD is used if the month isn't over yet (i.e. the csv for that month will change in the future)
+        month = query_params['month'] if 'month' in query_params else self.get_month(0, _current_date)
+        filename = self.get_filename(query_params, month, dir=function)
         
-        # Get time in EST
-        current_datetime = datetime.now(pytz.timezone("America/New_York"))
-        current_date = current_datetime.date()
-        
-        # If the day hasn't ended yet, AlphaVantage hasn't updated for the current day.
-        if current_datetime.hour < 16:
-            current_date -= timedelta(days=1)
-            
-        if type(months) == str:
-            if months[0] == '-':
-                first_month = int(months)
-                months = [ i for i in range(first_month, 1) ]
-                # print(months)
-            else:
-                raise SyntaxError("Invalid month string. Must be -[months].")
-        
-        # For each slice, download a csv
-        for slice in tqdm(months, "Downloading from AlphaVantage", ncols=80):
-            
-            if slice == None:
-                month_str = self.get_month(0, current_date)
-                slice_str = ""
-            else:
-                month_str = self.get_month(int(slice), current_date)
-                slice_str = "&month=" + month_str
-            
-            new_url = url + slice_str
-        
-            # print(new_url)
-            df = self.download_csv(new_url,
-                    self.get_filename(query_params, month_str, dir="monthly"), forceOverwrite)
-            dfs.append(df)
-            
-        return dfs
+        return [ (url, filename) ]
+    
     
     def get_month(self, offset: int, current_date: date):
         month = current_date.month
@@ -151,7 +161,7 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
             else:
                 return "%d-%02d-%02d"%(year, month, current_date.day)
     
-    def get_filename(self, query_params, slice, dir):
+    def get_filename(self, query_params, month, dir):
         def get_param(param):
             return query_params[param] if param in query_params else ""
         
@@ -166,13 +176,17 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
             "TIME_SERIES_DAILY": "d",
             "TIME_SERIES_DAILY_ADJUSTED": "d",
             "TIME_SERIES_INTRADAY": "i",
-            "TIME_SERIES_INTRADAY_EXTENDED": "i",
             "DIGITAL_CURRENCY_DAILY": "dc-d"
         }
         
-        if 'adjusted' not in query_params or query_params['adjusted'] == True:
-            slice += "adj"
         
+        
+        if 'adjusted' not in query_params or query_params['adjusted'] == True:
+            month += "adj"
+        
+        if 'extended' not in query_params or query_params['extended'] == True:
+            month += "ext"
+            
         interval = re.sub(r"([0-9]+)min", r"\1m", interval)
         
         if function in functions:
@@ -181,7 +195,7 @@ class AlphaVantageDataset(AdvancedTimeSeriesDataset):
         return 'csv/%s/%s%s%s%s.csv'%(
             dir,
             function, str(ticker),
-            param_name(interval), param_name(slice))
+            param_name(interval), param_name(month))
         
     def download_csv(self, url: str, file_name: str, force_overwrite: bool=False):
         # timestamp,open,high,low,close,volume

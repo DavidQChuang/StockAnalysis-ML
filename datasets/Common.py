@@ -1,4 +1,8 @@
+from abc import ABC, abstractmethod
 from ast import Index
+from datetime import timedelta
+from enum import Enum, Flag, IntEnum, auto
+
 import numpy as np
 import pandas as pd
 
@@ -11,6 +15,7 @@ from torch.utils import data
 
 from sklearn.preprocessing import StandardScaler
 
+from datasets.datasources import Semantics
 import datasets.indicators as indicators
 
 @dataclass
@@ -28,8 +33,9 @@ class DatasetConfig:
     seq_len     : int = 24
     out_seq_len : int = 1
     
-    indicators  : list[dict] = None
-    columns     : list[dict] = None
+    datasources : list[dict] = []
+    intervals   : list[str]  = []
+    indicators  : list[dict] = []
     
     test_split        : float = 0.1
     validation_split  : float = 0.2
@@ -71,6 +77,19 @@ def get_input_column_names(columns: list[dict]):
     return [ col['name'] for col in columns if 'is_input' in col and col['is_input'] ]
     
 @dataclass
+class DataframeConfig:
+    @classmethod
+    def from_dict(cls, env):      
+        return cls(**{
+            k: v for k, v in env.items() 
+            if k in inspect.signature(cls).parameters
+        })
+        
+    symbol      : str = ''
+    interval    : timedelta = timedelta()
+    
+    
+@dataclass
 class IndicatorConfig:
     @classmethod
     def from_dict(cls, env):      
@@ -95,7 +114,7 @@ class TimeSeriesDataset(Dataset):
                  seq_len=0, out_seq_len=0,
                  test_split=0.1, validation_split=0.2,
                  batch_size=64,
-                 column_names: list[str]=None, scaled_column_names: list[str]=None):
+                 column_names: list[str]|None=None, scaled_column_names: list[str]|None=None):
         self.df: pd.DataFrame = df
         self._target = target
         self._seq_len = seq_len
@@ -258,79 +277,42 @@ class TimeSeriesDataset(Dataset):
         return train_dataloader, valid_dataloader
         
 class AdvancedTimeSeriesDataset(TimeSeriesDataset):
-    def __init__(self, df: pd.DataFrame, conf=None):
+    def __init__(self, data_sources: list[Datasource], conf=None):
         if conf == None:
             self.conf = DatasetConfig()
         else:
             self.conf = conf
         
-        # Calculate indicators
-        start_index = 0
+        dataframe = pd.DataFrame()
         
-        if self.conf.indicators != None:
-            print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
-            for indicator in self.conf.indicators:
-                ind_conf = IndicatorConfig.from_dict(indicator)
-                
-                # How many values to remove from the start of the array due to insufficient data points
-                values_to_remove = ind_conf.period
-                
-                close_values = df['close']
-                
-                match ind_conf.function.upper():
-                    case 'SMA':
-                        ind_values = indicators.get_series_sma(ind_conf.period, close_values)
-                        
-                    case 'EMA':
-                        ind_values = indicators.get_series_ema(ind_conf.period, close_values)
-                        
-                    case 'MACD':
-                        ind_values = indicators.get_series_macd(ind_conf.period, ind_conf.period2, close_values)
-                            
-                    case 'LOG_VOL':
-                        ind_values = indicators.get_series_log_vol(df['volume'])
-                        values_to_remove = 0
-                        
-                    case 'DELTA':
-                        ind_values = df['close'].diff()
-                        values_to_remove = 1
-                            
-                    case _:
-                        raise Exception("Invalid indicator name: " + ind_conf.function)
-                
-                # Set amount of values to remove to the largest removal size
-                start_index = max(start_index, values_to_remove)
-
-                if ind_conf.name == None:
-                    ind_conf.name = indicators.get_indicator_name(ind_conf.function, ind_conf.period)
-
-                df[ind_conf.name] = ind_values
-        
-        # Remove values without indicators
-        if start_index != 0:
-            df = df.iloc[start_index:, :]
-        
-        df = df.assign(timestamp = pd.to_datetime(df['timestamp']))
-        for col in self.conf.columns:
-            match col['name']:
-                case 'dt_day':
-                    df['dt_day'] = df['timestamp'].dt.day
-                case 'dt_month':
-                    df['dt_month'] = df['timestamp'].dt.month
-                case 'dt_year':
-                    df['dt_year'] = df['timestamp'].dt.year
-                case 'dt_hour':
-                    df['dt_hour'] = df['timestamp'].dt.hour
-                case 'dt_minute':
-                    df['dt_minute'] = df['timestamp'].dt.minute
-                case 'dt_timestamp':
-                    df['dt_timestamp'] = df['timestamp'].astype(int)
-        
-        if self.conf.indicators != None:
-            # print(df.iloc[0:5, :])
-            print()
+        for data_source in data_sources:
+            if not self.verify_df_format(data_source.df):
+                raise Exception(f"Data source {data_source.name} did not contain all the expected columns.")
             
-        self.df: pd.DataFrame = df
+            if self.conf.indicators != []:
+                data_source.df, ind_names = self.generate_indicators(data_source.df, self.conf.intervals)
+                
+            ds_name = data_source.name
+            add_ds_name = lambda val: f"{ds_name}_{val}"
+                
+            if Semantics.TIMESTAMP in data_source.column_flags:
+                to_columns = []
+                from_columns = []
+            
+                # Add bid/ask and ohlcv columns, in that order
+                for col in (Semantics.BIDASK | Semantics.OHLCV):
+                    base_name = col.name.lower() # e.g. bid, ask
+                    
+                    from_columns += base_name
+                    to_columns += add_ds_name(base_name) # e.g. tqqq_bid, vxx_ask
+            
+                # Add indicator columns in order after the other columns
+                from_columns += ind_names
+                to_columns += list(map(add_ds_name, ind_names))
+                
+                dataframe[to_columns] = data_source.df[from_columns]
+                    
+        self.df: pd.DataFrame = dataframe
         super().__init__(self.df,
                          self.conf.target,
                          self.conf.seq_len,
@@ -340,6 +322,13 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                          self.conf.batch_size,
                          self.column_names,
                          self.scaled_column_names)
+
+    @classmethod
+    def combine_dataframes(cls, symbol_dataframes: dict[str, pd.DataFrame]):
+        for name, df in symbol_dataframes.items():
+            col_name = f"{name}_"
+            
+            # TODO
 
     @property
     def indicators(self):
@@ -361,3 +350,72 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
     def input_column_names(self):
         return self.conf.input_column_names
     
+    def generate_datetime(self, df):
+        df = df.assign(timestamp = pd.to_datetime(df['timestamp']))
+        for col in self.conf.columns:
+            match col['name']:
+                case 'dt_day':
+                    df['dt_day'] = df['timestamp'].dt.day
+                case 'dt_month':
+                    df['dt_month'] = df['timestamp'].dt.month
+                case 'dt_year':
+                    df['dt_year'] = df['timestamp'].dt.year
+                case 'dt_hour':
+                    df['dt_hour'] = df['timestamp'].dt.hour
+                case 'dt_minute':
+                    df['dt_minute'] = df['timestamp'].dt.minute
+                case 'dt_timestamp':
+                    df['dt_timestamp'] = df['timestamp'].astype(int)
+                    
+        return df
+    
+    def generate_indicators(self, ohlc_df, intervals):
+        print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
+        indicator_names = []
+        
+        # if intervals == []:
+        #     intervals = TODO
+        
+        for indicator in self.conf.indicators:
+            ind_conf = IndicatorConfig.from_dict(indicator)
+            
+            # How many values to remove from the start of the array due to insufficient data points
+            values_to_remove = ind_conf.period
+            
+            close_values = ohlc_df['close']
+            
+            match ind_conf.function.upper():
+                case 'SMA':
+                    ind_values = indicators.get_series_sma(ind_conf.period, close_values)
+                    
+                case 'EMA':
+                    ind_values = indicators.get_series_ema(ind_conf.period, close_values)
+                    
+                case 'MACD':
+                    ind_values = indicators.get_series_macd(ind_conf.period, ind_conf.period2, close_values)
+                        
+                case 'LOG_VOL':
+                    ind_values = indicators.get_series_log_vol(ohlc_df['volume'])
+                    values_to_remove = 0
+                    
+                case 'DELTA':
+                    ind_values = ohlc_df['close'].diff()
+                    values_to_remove = 1
+                        
+                case _:
+                    raise Exception("Invalid indicator name: " + ind_conf.function)
+            
+            # Set amount of values to remove to the largest removal size
+            start_index = max(start_index, values_to_remove)
+
+            if ind_conf.name is None:
+                ind_conf.name = indicators.get_indicator_name(ind_conf.function, ind_conf.period)
+            indicator_names.append(ind_conf.name)
+
+            ohlc_df[ind_conf.name] = ind_values
+    
+        # Remove values without indicators
+        if start_index != 0:
+            ohlc_df = ohlc_df.iloc[start_index:, :]
+            
+        return ohlc_df, indicator_names

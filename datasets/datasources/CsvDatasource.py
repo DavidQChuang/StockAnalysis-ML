@@ -1,5 +1,4 @@
 from tqdm import tqdm
-from .Common import DatasetConfig, AdvancedTimeSeriesDataset
 
 import os
 import re
@@ -7,14 +6,16 @@ import pandas as pd
 from datetime import date
 from urllib.parse import urlencode
 
-class CsvDataset(AdvancedTimeSeriesDataset):
-    def __init__(self, dataset_json):
-        conf = DatasetConfig.from_dict(dataset_json)
+from datasets.Common import DatasetConfig
+from datasets.datasources import Datasource
+
+class CsvDatasource(Datasource):
+    def __init__(self, datasource_json, force_overwrite):
+        if 'csv' not in datasource_json:
+            raise Exception("'csv' key must be present in dataset parameters.")
+        query_params = datasource_json['csv']
         
-        if 'file_path' not in dataset_json:
-            raise Exception("'file_path]' key must be present in dataset parameters.")
-        
-        file_path = dataset_json['file_path']
+        file_path = query_params['file_path']
         
         if os.path.isdir(file_path):
             dfs = []
@@ -33,4 +34,4 @@ class CsvDataset(AdvancedTimeSeriesDataset):
         else:
             raise Exception(f"CSV file `{file_path}` does not exist.")
         
-        super().__init__(df, conf)
+        super().__init__(datasource_json, force_overwrite)
