@@ -1,6 +1,4 @@
-from datasets.AlphaVantageDataset import AlphaVantageDataset
-from datasets.CsvDataset import CsvDataset
-from datasets.Common import TimeSeriesDataset
+from datasets.Common import TimeSeriesDataset, AdvancedTimeSeriesDataset
 
 def from_run(run_data, **kwargs) -> TimeSeriesDataset:
     if 'dataset' not in run_data:
@@ -9,12 +7,5 @@ def from_run(run_data, **kwargs) -> TimeSeriesDataset:
         raise Exception("'dataset_name' cannot be None.")
     
     dataset_json = run_data["dataset"]
-    dataset_name = run_data["dataset_name"]
     
-    match dataset_name:
-        case 'alphavantage':
-            return AlphaVantageDataset(dataset_json)
-        case 'csv':
-            return CsvDataset(dataset_json)
-        case _:
-            raise "Model not found."
+    return AdvancedTimeSeriesDataset(dataset_json)

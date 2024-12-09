@@ -71,7 +71,7 @@
                     "symbol": "TQQQ",
 
                     "function": "TIME_SERIES_INTRADAY",
-                    "months": "-24",
+                    "month": "-24",
                     "interval": "5min",
                     "outputsize": "full",
                     "extended_hours": false

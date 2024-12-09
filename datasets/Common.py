@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from ast import Index
 from datetime import timedelta
 from enum import Enum, Flag, IntEnum, auto
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -15,8 +16,7 @@ from torch.utils import data
 
 from sklearn.preprocessing import StandardScaler
 
-from datasets.datasources import Semantics
-import datasets.indicators as indicators
+from datasets.datasources import Datasource, Semantics
 
 @dataclass
 class DatasetConfig:
@@ -30,18 +30,29 @@ class DatasetConfig:
     # Model I/O window sizes
     # These values will be copied from the model JSON,
     # so the values of these don't matter and they don't need to be defined in 'dataset'.
-    seq_len     : int = 24
-    out_seq_len : int = 1
+    seq_len     : int = 0
+    out_seq_len : int = 0
     
-    datasources : list[dict] = []
-    intervals   : list[str]  = []
-    indicators  : list[dict] = []
+    datasources         : dict[str, dict[str, Any]] = {}
+    # Fields passed to datasources
+    resample_intervals  : list[str]  = []
+    indicators          : list[dict[str, Any]] = []
+    columns             : list[dict[str, Any]] = []
     
+    # Other parmaeters for use during inference training
     test_split        : float = 0.1
     validation_split  : float = 0.2
     batch_size          : int = 64
     
     target      : str = "close"
+    
+    @classmethod
+    def get_datasource_inherited_keys(cls):
+        return ['resample_intervals', 'indicators', 'columns']
+    
+    @classmethod
+    def get_datasource_inherited_values(cls, dataset_json):
+        return { key: dataset_json[key] for key in cls.get_datasource_inherited_keys() }
     
     @property
     def column_names(self):
@@ -65,16 +76,16 @@ class DatasetConfig:
 # Shared code between ModelConfig and DatasetConfig
 def get_scaled_column_names(columns: list[dict]):
     '''
-    Returns all column names where is_scaled is true or not present (i.e. default if not present is true)
+    Returns all column names where is_scaled is present and true (i.e. default if not present is false)
     '''
-    x =  [ col['name'] for col in columns if (not 'is_scaled' in col) or (col['is_scaled']) ]
+    x =  [ col['name'] for col in columns if ('is_scaled' in col) and col['is_scaled'] ]
     return x
 
 def get_input_column_names(columns: list[dict]):
     '''
-    Returns all column names where is_input is present and true (i.e. default if not present is false)
+    Returns all column names where is_input is not present or true (i.e. default if not present is true)
     '''
-    return [ col['name'] for col in columns if 'is_input' in col and col['is_input'] ]
+    return [ col['name'] for col in columns if (not 'is_input' in col) or col['is_input'] ]
     
 @dataclass
 class DataframeConfig:
@@ -88,25 +99,6 @@ class DataframeConfig:
     symbol      : str = ''
     interval    : timedelta = timedelta()
     
-    
-@dataclass
-class IndicatorConfig:
-    @classmethod
-    def from_dict(cls, env):      
-        return cls(**{
-            k: v for k, v in env.items() 
-            if k in inspect.signature(cls).parameters
-        })
-        
-    # Model I/O window sizes
-    # These values will be copied from the model JSON,
-    # so the values of these don't matter and they don't need to be defined in 'dataset'.
-    name         : str  = ''
-    function     : str  = 'SMA'
-    period       : int  = 20
-    period2      : int  = 12
-    is_input     : bool = False
-    is_scaled    : bool = True
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, df: pd.DataFrame,
@@ -114,7 +106,7 @@ class TimeSeriesDataset(Dataset):
                  seq_len=0, out_seq_len=0,
                  test_split=0.1, validation_split=0.2,
                  batch_size=64,
-                 column_names: list[str]|None=None, scaled_column_names: list[str]|None=None):
+                 column_names: list[str]=None, scaled_column_names: list[str]=None): # type: ignore
         self.df: pd.DataFrame = df
         self._target = target
         self._seq_len = seq_len
@@ -237,7 +229,7 @@ class TimeSeriesDataset(Dataset):
         
         print('After: \n', dataset.df[dataset.column_names][:3], 'dtype=', dataset.df['close'].dtype)
         print('Sanity check (should be equal to first close value): ',
-              (dataset.df['close'].iloc[0] * self.scaler.scale_[0] + self.scaler.mean_[0]))
+              (dataset.df['close'].iloc[0] * self.scaler.scale_[0] + self.scaler.mean_[0])) # type: ignore
         print()
         
         return dataset
@@ -277,42 +269,53 @@ class TimeSeriesDataset(Dataset):
         return train_dataloader, valid_dataloader
         
 class AdvancedTimeSeriesDataset(TimeSeriesDataset):
-    def __init__(self, data_sources: list[Datasource], conf=None):
-        if conf == None:
-            self.conf = DatasetConfig()
+    def __init__(self, dataset_json: dict[str, Any]=None, data_sources: list[Datasource]=None, conf:DatasetConfig=None): # type: ignore
+        if dataset_json is not None:
+            self.conf = DatasetConfig.from_dict(dataset_json)
+            
+            data_sources = []
+            for source_name, source_json in self.conf.datasources.items():
+                if 'datasource_class' not in source_json:
+                    raise Exception(f"'datasource_class' cannot be None in datasource {source_name}.")
+                
+                source_class_name = source_json['datasource_class']
+                SourceClass = Datasource.get_subclass(source_class_name)
+                
+                # Use the dataset's values for these keys
+                # unless they're already given inside the datasource
+                copy_values = DatasetConfig.get_datasource_inherited_values(dataset_json)
+                source_json = copy_values.update({source_json}) # type: ignore
+                
+                if SourceClass is not None:
+                    source = SourceClass(source_json)
+                    data_sources.append(source)
+                else:
+                    raise Exception(f"Class of 'datasource_class' ({source_class_name}) could not be found in datasource {source_name}.")
         else:
             self.conf = conf
         
-        dataframe = pd.DataFrame()
+        # Combine dataframes from data sources
+        dfs = []
+        all_columns = set[str]()
+        for source in data_sources:
+            # Get dataframe
+            df = source.get_dataframe()
+            columns = set(df.columns)
+            
+            # Make sure no columns overlap
+            # TODO: necessary?
+            overlapping_cols = all_columns.intersection(columns)
+            if len(overlapping_cols) != 0:
+                raise ValueError(f"Datasources could not be combined due to overlapping columns: {overlapping_cols}")
+            
+            # Update set of existing columns
+            all_columns.update(columns)
+            
+            # Add dataframe to list of dfs
+            dfs.append(df)
         
-        for data_source in data_sources:
-            if not self.verify_df_format(data_source.df):
-                raise Exception(f"Data source {data_source.name} did not contain all the expected columns.")
-            
-            if self.conf.indicators != []:
-                data_source.df, ind_names = self.generate_indicators(data_source.df, self.conf.intervals)
-                
-            ds_name = data_source.name
-            add_ds_name = lambda val: f"{ds_name}_{val}"
-                
-            if Semantics.TIMESTAMP in data_source.column_flags:
-                to_columns = []
-                from_columns = []
-            
-                # Add bid/ask and ohlcv columns, in that order
-                for col in (Semantics.BIDASK | Semantics.OHLCV):
-                    base_name = col.name.lower() # e.g. bid, ask
-                    
-                    from_columns += base_name
-                    to_columns += add_ds_name(base_name) # e.g. tqqq_bid, vxx_ask
-            
-                # Add indicator columns in order after the other columns
-                from_columns += ind_names
-                to_columns += list(map(add_ds_name, ind_names))
-                
-                dataframe[to_columns] = data_source.df[from_columns]
-                    
-        self.df: pd.DataFrame = dataframe
+        self.df: pd.DataFrame = pd.concat(dfs, axis=1)
+        
         super().__init__(self.df,
                          self.conf.target,
                          self.conf.seq_len,
@@ -322,13 +325,6 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
                          self.conf.batch_size,
                          self.column_names,
                          self.scaled_column_names)
-
-    @classmethod
-    def combine_dataframes(cls, symbol_dataframes: dict[str, pd.DataFrame]):
-        for name, df in symbol_dataframes.items():
-            col_name = f"{name}_"
-            
-            # TODO
 
     @property
     def indicators(self):
@@ -349,73 +345,3 @@ class AdvancedTimeSeriesDataset(TimeSeriesDataset):
     @property
     def input_column_names(self):
         return self.conf.input_column_names
-    
-    def generate_datetime(self, df):
-        df = df.assign(timestamp = pd.to_datetime(df['timestamp']))
-        for col in self.conf.columns:
-            match col['name']:
-                case 'dt_day':
-                    df['dt_day'] = df['timestamp'].dt.day
-                case 'dt_month':
-                    df['dt_month'] = df['timestamp'].dt.month
-                case 'dt_year':
-                    df['dt_year'] = df['timestamp'].dt.year
-                case 'dt_hour':
-                    df['dt_hour'] = df['timestamp'].dt.hour
-                case 'dt_minute':
-                    df['dt_minute'] = df['timestamp'].dt.minute
-                case 'dt_timestamp':
-                    df['dt_timestamp'] = df['timestamp'].astype(int)
-                    
-        return df
-    
-    def generate_indicators(self, ohlc_df, intervals):
-        print("Loading indicators " + ','.join(map(lambda x: x['function'], self.conf.indicators)))
-        indicator_names = []
-        
-        # if intervals == []:
-        #     intervals = TODO
-        
-        for indicator in self.conf.indicators:
-            ind_conf = IndicatorConfig.from_dict(indicator)
-            
-            # How many values to remove from the start of the array due to insufficient data points
-            values_to_remove = ind_conf.period
-            
-            close_values = ohlc_df['close']
-            
-            match ind_conf.function.upper():
-                case 'SMA':
-                    ind_values = indicators.get_series_sma(ind_conf.period, close_values)
-                    
-                case 'EMA':
-                    ind_values = indicators.get_series_ema(ind_conf.period, close_values)
-                    
-                case 'MACD':
-                    ind_values = indicators.get_series_macd(ind_conf.period, ind_conf.period2, close_values)
-                        
-                case 'LOG_VOL':
-                    ind_values = indicators.get_series_log_vol(ohlc_df['volume'])
-                    values_to_remove = 0
-                    
-                case 'DELTA':
-                    ind_values = ohlc_df['close'].diff()
-                    values_to_remove = 1
-                        
-                case _:
-                    raise Exception("Invalid indicator name: " + ind_conf.function)
-            
-            # Set amount of values to remove to the largest removal size
-            start_index = max(start_index, values_to_remove)
-
-            if ind_conf.name is None:
-                ind_conf.name = indicators.get_indicator_name(ind_conf.function, ind_conf.period)
-            indicator_names.append(ind_conf.name)
-
-            ohlc_df[ind_conf.name] = ind_values
-    
-        # Remove values without indicators
-        if start_index != 0:
-            ohlc_df = ohlc_df.iloc[start_index:, :]
-            
-        return ohlc_df, indicator_names

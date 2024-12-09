@@ -1,8 +1,5 @@
 import json
 import os
-import sys
-
-import datasets.indicators as indicators
 
 def except_nokey(dict, key, desc):
     if key not in dict:
@@ -115,22 +112,24 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
             run_data["dataset"]['columns'] = [{ "name": 'close', "is_scaled": True}]
         run_data["model"]['columns'] = run_data["dataset"]['columns']
             
-        # Create dataset.columns from dataset.indicators
-        if 'indicators' in run_data['dataset']:
-            run_data['model']['indicators'] = run_data['dataset']['indicators']
+        # MOVED TO Dataset
+        # # Create dataset.columns from dataset.indicators
+        # if 'indicators' in run_data['dataset']:
+        #     run_data['model']['indicators'] = run_data['dataset']['indicators']
             
-            for indicator in run_data['dataset']['indicators']:
-                if 'is_input' in indicator and indicator['is_input']:
-                    if 'name' not in indicator:
-                        indicator['name'] = indicators.get_indicator_name_json(indicator)
-                    ind_name = indicator['name']
+        #     for indicator_json in run_data['dataset']['indicators']:
+        #         # If indicator is used as input and doesn't have a name
+        #         if 'is_input' not in indicator_json or indicator_json['is_input']:
+        #             if 'name' not in indicator_json:
+        #                 indicator_json['name'] = Indicators.get_indicator_name(Indicators.IndicatorConfig(indicator_json))
+        #             ind_name = indicator_json['name']
                     
-                    # model.columns updates with dataset.columns
-                    run_data['dataset']['columns'].append({
-                        "name": ind_name,
-                        "from_indicator": True,
-                        "is_scaled": 'is_scaled' not in indicator or indicator['is_scaled']
-                    })
+        #             # model.columns updates with dataset.columns
+        #             run_data['dataset']['columns'].append({
+        #                 "name": ind_name,
+        #                 "from_indicator": True,
+        #                 "is_scaled": 'is_scaled' in indicator_json and indicator_json['is_scaled']
+        #             })
         
         print(f"> Running {run_name}")
         print()

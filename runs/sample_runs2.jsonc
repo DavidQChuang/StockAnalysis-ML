@@ -65,50 +65,100 @@
                 "tags": [ "Intraday", "LSTM", "Stock" ]
             },
 
-            "dataset_name": "alphavantage",
             "dataset": {
-                "alphavantage": {
-                    "symbol": "TQQQ",
+                "datasources": {
+                    "tqqq": {
+                        "datasource_class": "AlphaVantageDatasource",
+                        "symbol": "TQQQ",
+                        "interval": "1min",
+                        "column_flags": "TIMESTAMP & OHLCV & SEM_PRICE",
+                        "generate_intervals": true,
 
-                    "function": "TIME_SERIES_INTRADAY",
-                    "month": "-8",
-                    "interval": "5min",
-                    "outputsize": "full",
-                    "extended_hours": true,
-                    "adjusted": true
+                        "alphavantage": {
+                            "symbol": "TQQQ",
+                            "interval": "1min",
+                            "function": "TIME_SERIES_INTRADAY",
+                            "month": "-8",
+                            "outputsize": "full",
+                            "extended_hours": true,
+                            "adjusted": true
+                        }
+                    },
+                    "vxx": {
+                        "datasource_class": "AlphaVantageDatasource",
+                        "symbol": "VXX",
+                        "interval": "1min",
+                        "column_flags": "TIMESTAMP & OHLC & SEM_VOLATILITY",
+                        "generate_intervals": true,
+
+                        "alphavantage": {
+                            "symbol": "VXX",
+                            "interval": "1min",
+                            "function": "TIME_SERIES_INTRADAY",
+                            "month": "-8",
+                            "outputsize": "full",
+                            "extended_hours": true,
+                            "adjusted": true
+                        }
+                    },
+                    "tech-news": {
+                        "datasource_class": "AlphaVantageDatasource",
+                        "symbol": "tech-news",
+                        "interval": "variable",
+                        "column_flags": "TIMESTAMP & SEM_NEWS",
+
+                        "function": "NEWS_SENTIMENT",
+                        "topics": "technology",
+                        "limit": 1000,
+                        "sort": "LATEST",
+
+                        "indicators": [],
+
+                    }
                 },
+                "resample_intervals": [
+                    "1min", "5min", "15min", "30min",
+                    "1hr", "4hr", "1d", "4d", "1w" 
+                ],
                 "indicators": [
                     {
-                        "function": "EMA",
-                        "period": 9,
-                        "is_input": true,
-                        "is_scaled": true
+                        "function": "TA.EMA",
+                        "is_scaled": true,
+                        "offset": 9,
+                        "params": { "period": 9 }
                     },
                     {
-                        "function": "EMA",
-                        "period": 20,
-                        "is_input": true,
-                        "is_scaled": true
+                        "function": "TA.EMA",
+                        "is_scaled": true,
+                        "offset": 20,
+                        "params": { "period": 20 }
                     },
                     {
-                        "function": "MACD",
-                        "period": 26,
-                        "period2": 12,
-                        "is_input": true
+                        "function": "TA.MACD",
+                        "is_scaled": true,
+                        "offset": 26,
+                        "params": {
+                            "period_fast": 26,
+                            "period_slow": 12
+                        }
                     },
                     {
-                        "function": "delta",
-                        "is_input": true
+                        "function": "np.diff(close)",
+                        "name": "delta",
+                        "offset": 1
                     },
                     {
-                        "function": "log_vol",
-                        "is_input": true
+                        "function": "np.log(volume)",
+                        "name": "log_vol"
                     }
                 ],
-                "columns": [
+                "include_columns": [
+                    { "name": "open", "is_scaled": true },
+                    { "name": "high", "is_scaled": true },
+                    { "name": "low", "is_scaled": true },
                     { "name": "close", "is_scaled": true },
-                    { "name": "dt_hour", "is_scaled": true },
-                    { "name": "dt_minute", "is_scaled": true }
+                    { "name": "dt_hour" },
+                    { "name": "dt_minute" }
                 ],
 
                 "target": "close_delta"
@@ -204,8 +254,6 @@
                 }
             }
         },
-
-
 
         "Daily-LSTM-TQQQ": {
             "neptune": {

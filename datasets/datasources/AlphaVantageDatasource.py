@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
 class AlphaVantageDatasource(Datasource):
-    def get_dataframe(self, datasource_json: dict, config: DatasourceConfig, force_overwrite=False) -> pd.DataFrame:
+    def _retrieve_dataframe(self, datasource_json: dict, config: DatasourceConfig, force_overwrite=False) -> pd.DataFrame:
         url = "https://www.alphavantage.co/query?"
         
         if 'alphavantage' not in datasource_json:
