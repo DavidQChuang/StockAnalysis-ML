@@ -20,4 +20,4 @@ then
     "$python_cmd" -m pip install -r requirements.txt
 fi
 
-"$python_cmd" Trainer.py "$@"
+"$python_cmd" stockanalysis-ml/Trainer.py "$@"

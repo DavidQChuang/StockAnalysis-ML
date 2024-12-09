@@ -6,7 +6,7 @@ from models.SimpleLSTM import SimpleLSTM
 import torch.nn as nn
 import pandas as pd
 
-class TestStringMethods(unittest.TestCase):
+class TestPytorchModel(unittest.TestCase):
 
     def test_scale(self):
         '''

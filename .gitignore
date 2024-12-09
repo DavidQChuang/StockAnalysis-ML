@@ -1,13 +1,13 @@
 **/__pycache__/
 /.neptune
 /.vscode
-/csv
-/ckpt
-/model
-/runs/model_runs.json
+/stockanalysis-ml/csv
+/stockanalysis-ml/ckpt
+/stockanalysis-ml/model
 
 user_vars.py
 user-vars.sh
 /venv
+
 
 *.DS_Store

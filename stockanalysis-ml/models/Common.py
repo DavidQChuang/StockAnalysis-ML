@@ -444,6 +444,14 @@ class PytorchModel(StandardModel):
                 train_err += err_vec.mean().item()
                 train_err_max = max(train_err_max, self.scale_output(err_vec.max().item(), column=dataset.target, is_delta=True))
                 
+                if self.scale_output(err_vec.max().item(), column=dataset.target, is_delta=True) > 8:
+                    print("ERR_VEC", err_vec)
+                    print("X", self.scale_output(X[0,:,0]))
+                    print("Y", self.scale_output(Y[0,:], is_delta=True))
+                    print("Y_HAT", self.scale_output(y_hat[0,:], is_delta=True))
+                    
+                    raise ""
+                
                 # b, n, f
                 train_acc += (torch.sign(y_hat * Y) > 0).sum().item() / y_hat.numel()
                 
