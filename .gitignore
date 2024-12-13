@@ -1,9 +1,14 @@
 **/__pycache__/
 /.neptune
 /.vscode
-/stockanalysis-ml/csv
-/stockanalysis-ml/ckpt
-/stockanalysis-ml/model
+
+# Exclude random csv stuff, except monthlies
+/csv/*
+!/csv/monthly
+
+/ckpt
+/model
+/stuff
 
 user_vars.py
 user-vars.sh
