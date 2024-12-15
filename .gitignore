@@ -6,13 +6,19 @@
 /csv/*
 !/csv/monthly
 
+# Don't include checkpoints, as well as other things that have no reason to be in git.
 /ckpt
-/model
 /stuff
+/venv
+/dist
+**/*.egg-info
 
+# Non example versions of are used for me, the dev
 user_vars.py
 user-vars.sh
-/venv
+
+# Build files
+dist/
 
 
 *.DS_Store
