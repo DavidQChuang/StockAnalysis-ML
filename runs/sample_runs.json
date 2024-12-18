@@ -72,7 +72,7 @@
             "dataset": {
                 "sources": {
                     "tqqq": {
-                        "datasource_class": "AlphaVantageDatasource",
+                        "source_class": "AlphaVantageSource",
                         "symbol": "TQQQ",
                         "interval": "1min",
                         "column_flags": "TIMESTAMP & OHLCV & SEM_PRICE",
@@ -89,7 +89,7 @@
                         }
                     },
                     "vxx": {
-                        "datasource_class": "AlphaVantageDatasource",
+                        "source_class": "AlphaVantageSource",
                         "symbol": "VXX",
                         "interval": "1min",
                         "column_flags": "TIMESTAMP & OHLC & SEM_VOLATILITY",
@@ -104,19 +104,6 @@
                             "extended_hours": true,
                             "adjusted": true
                         }
-                    },
-                    "tech-news": {
-                        "datasource_class": "AlphaVantageDatasource",
-                        "symbol": "tech-news",
-                        "interval": "variable",
-                        "column_flags": "TIMESTAMP & SEM_NEWS",
-
-                        "function": "NEWS_SENTIMENT",
-                        "topics": "technology",
-                        "limit": 1000,
-                        "sort": "LATEST",
-
-                        "indicators": []
                     }
                 },
                 "resample_intervals": [

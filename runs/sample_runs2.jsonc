@@ -1,12 +1,16 @@
 {
     "env": {
-        "global.dataset.alphavantage.apikey": "ALPHAVANTAGE_APIKEY"
+        "global.dataset.sources.*.alphavantage.apikey": "ALPHAVANTAGE_APIKEY"
     },
 
     "global": {
         "dataset": {
-            "alphavantage": {
-                "datatype": "csv"
+            "sources": {
+                "*": {
+                    "alphavantage": {
+                        "datatype": "csv"
+                    }
+                }
             },
 
             "scale_real_columns": [ ],
@@ -66,9 +70,9 @@
             },
 
             "dataset": {
-                "datasources": {
+                "sources": {
                     "tqqq": {
-                        "datasource_class": "AlphaVantageDatasource",
+                        "source_class": "AlphaVantageSource",
                         "symbol": "TQQQ",
                         "interval": "1min",
                         "column_flags": "TIMESTAMP & OHLCV & SEM_PRICE",
@@ -85,7 +89,7 @@
                         }
                     },
                     "vxx": {
-                        "datasource_class": "AlphaVantageDatasource",
+                        "source_class": "AlphaVantageSource",
                         "symbol": "VXX",
                         "interval": "1min",
                         "column_flags": "TIMESTAMP & OHLC & SEM_VOLATILITY",
@@ -102,7 +106,7 @@
                         }
                     },
                     "tech-news": {
-                        "datasource_class": "AlphaVantageDatasource",
+                        "source_class": "AlphaVantageSource",
                         "symbol": "tech-news",
                         "interval": "variable",
                         "column_flags": "TIMESTAMP & SEM_NEWS",
@@ -112,8 +116,7 @@
                         "limit": 1000,
                         "sort": "LATEST",
 
-                        "indicators": [],
-
+                        "indicators": []
                     }
                 },
                 "resample_intervals": [
