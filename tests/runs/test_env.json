@@ -1,0 +1,17 @@
+{
+    "env": {
+        "global.dataset.api_key": "API_KEY"
+    },
+    "global":{
+        "test": {
+            "test_sub": {}
+        }
+    },
+    "runs": {
+        "test_run": {
+            "dataset": {
+
+            }
+        }
+    }
+}

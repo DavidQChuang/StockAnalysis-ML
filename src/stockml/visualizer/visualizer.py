@@ -6,7 +6,7 @@ from PyQt6.QtCore import QObject
 import numpy as np
 import pyqtgraph as pg
 
-from stockml.datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
+from stockml.datasets.Common import MultisourceTimeSeriesDataset, TimeSeriesDataset
 
 class nparraylist:
     def __init__(self, shape=(0,), dtype=float):
@@ -30,7 +30,7 @@ class nparraylist:
         return self.data[:self.size]
 
 class VApp(QtWidgets.QMainWindow):
-    dataset: AdvancedTimeSeriesDataset
+    dataset: MultisourceTimeSeriesDataset
     
     def __init__(self, main_fn: Callable[['VWorker', 'VApp'],None], parent=None):
         super(VApp, self).__init__(parent)
@@ -139,7 +139,7 @@ class VApp(QtWidgets.QMainWindow):
         # self._update()
         
     #### Initialization slots  #####################
-    @QtCore.pyqtSlot(AdvancedTimeSeriesDataset)
+    @QtCore.pyqtSlot(MultisourceTimeSeriesDataset)
     def update_dataset(self, dataset):
         self.dataset = dataset
     
@@ -256,7 +256,7 @@ class VWorker(QtCore.QThread):
     sig_y = QtCore.pyqtSignal(np.ndarray)
     sig_y_hat = QtCore.pyqtSignal(np.ndarray)
     
-    sig_dataset = QtCore.pyqtSignal(AdvancedTimeSeriesDataset)
+    sig_dataset = QtCore.pyqtSignal(MultisourceTimeSeriesDataset)
     
     def __init__(self, main_fn: Callable[['VWorker','VApp'],None], app: VApp, parent: QObject | None = None) -> None:
         super().__init__(parent)

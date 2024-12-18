@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Tuple
 
 from networkx import is_path
 
@@ -33,7 +34,9 @@ def get_path_in(path, dictionary):
             
     return dictionary
 
-def from_file(run_file: str, run_name: str, **kwargs) -> dict:
+def from_file(run_file: str, run_name: str, **kwargs) -> Tuple[dict, str]:
+    print("[###] > Reading run from run_file (default: runs/model_runs.json or runs/sample_runs.json).")
+    
     if run_file is None or run_file == "runs/model_runs.json":
         if os.path.exists("runs/model_runs.json"):
             run_file="runs/model_runs.json"
@@ -45,7 +48,7 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
     if run_name is None:
         raise Exception("'run_name' cannot be None.")
         
-    print(f"> Reading run file {run_file}")
+    print(f"├[1/3] > Reading run file {run_file}")
     if os.path.exists(run_file):
         with open(run_file) as file:
             file_json = json.load(file)
@@ -53,7 +56,6 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
         except_nokey(file_json, 'runs', 'runs file')
             
         # Get environment variable data
-        
         if 'env' in file_json:
             for key, value in file_json['env'].items():
                 if value not in os.environ:
@@ -85,6 +87,7 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
         # Get runs    
         runs = file_json['runs']
         
+        # Find full run name.
         for name in runs.keys():
             if name.lower().startswith(run_name):
                 run_name = name
@@ -102,37 +105,39 @@ def from_file(run_file: str, run_name: str, **kwargs) -> dict:
             del run_data['copy_run']
             
             if copy_run_name not in copied_runs:
-                print(f"Copying from run {copy_run_name}")
+                print(f"├[2/3] > Copying from run {copy_run_name}")
             
                 except_nokey(runs, copy_run_name, 'runs file; run does not exist')
                 
                 merge(run_data, runs[copy_run_name])
                 copied_runs.add(copy_run_name)
-        
-        # Merge global run into this run without replacing existing values
-        merge(run_data, global_run_data)
-        
-        # Merge global * datasource into this run's datasource without replacing existing values
+                
+                
+        # Merge global * source into this run's source without replacing existing values
         global_source_json = get_path_in('dataset.sources.*', global_run_data)
         if global_source_json:
             run_source_data = get_path_in('dataset.sources', run_data)
             if run_source_data:
                 for source_name, source_json in run_source_data.items():
                     # Overwrite the global source_json with the specific source_json
-                    new_source_json = global_source_json.copy()
-                    new_source_json.update(source_json)
+                    merge(source_json, global_source_json)
                     
-                    run_source_data[source_name] = new_source_json
+                    run_source_data[source_name] = source_json
         
-        print(f"> Running {run_name}")
+            del global_run_data['dataset']['sources']['*']
+        
+        # Merge global run into this run without replacing existing values
+        merge(run_data, global_run_data)
+        
+        print(f"└[3/3] > Loaded {run_name}")
         print()
         
-        return run_data
+        return run_data, run_name
             
     else:
         raise Exception("Runs file does not exist.")
     
-def from_input(run_file: str, **kwargs) -> dict:
+def from_input(run_file: str, **kwargs) -> Tuple[dict, str]:
     print("> Selecting run from input. Runs:")
     
     # Check for file

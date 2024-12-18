@@ -3,7 +3,7 @@ import re
 
 from finta import TA
 
-from stockml.datasets.datasources.columns import IndicatorColumn
+from stockml.datasets.sources.columns import IndicatorColumn
 
 def get_indicator_name(ind_json=None, ind_conf=None):
     if ind_conf is None:

@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from tqdm import tqdm
 
@@ -15,6 +16,8 @@ import torch.autograd.anomaly_mode as anomaly
 import math
 from torch import nn, optim
 from abc import ABC, abstractmethod
+
+from stockml.vprint import vprint
 
 def get_bar_format(dataset_len, batch_size):
     len_n_fmt = len(str(math.ceil((dataset_len / batch_size))))
@@ -621,14 +624,16 @@ class PytorchModel(StandardModel):
         # self.save("ckpt/fail_" + self.get_filename())
         raise ArithmeticError("Failed training, loss = NaN")
         
-import deepspeed
-        
 class DeepspeedModel(PytorchModel):
     def __init__(self, module: nn.Module, columns: list[str], scaled_columns: list[str], model_json, device=None, verbosity=1):
         super().__init__(module, columns, scaled_columns, model_json, device, verbosity=0)
         
         if 'deepspeed' not in model_json:
             raise Exception("'deepspeed' key must be present in model parameters.")
+        
+        if 'deepspeed' not in sys.modules:
+            vprint(verbosity, 1, "> Loading deepspeed.")
+            import deepspeed
         
         # Copy normal model parameters
         model_json['deepspeed']['train_batch_size'] = model_json['batch_size']

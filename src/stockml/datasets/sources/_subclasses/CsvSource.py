@@ -2,9 +2,9 @@
 import os
 import pandas as pd
 
-from ..Common import Datasource
+from ..Common import Source
 
-class CsvDatasource(Datasource):
+class CsvSource(Source):
     def __init__(self, datasource_json, force_overwrite):
         if 'csv' not in datasource_json:
             raise Exception("'csv' key must be present in dataset parameters.")

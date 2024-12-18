@@ -1,0 +1,23 @@
+{
+    "global":{
+        "dataset": {
+            "sources": {
+                "*": {
+                    "test_key": {
+                        "a": 123
+                    }
+                }
+            }
+        }
+    },
+    "runs": {
+        "test_run": {
+            "dataset": {
+                "sources": {
+                    "source_a": {},
+                    "source_b": {}
+                }
+            }
+        }
+    }
+}

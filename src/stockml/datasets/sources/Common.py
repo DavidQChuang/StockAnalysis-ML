@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from stockml.datasets.datasources.columns import DatasourceColumn, IndicatorColumn, Semantics
+from stockml.datasets.sources.columns import SourceColumn, IndicatorColumn, Semantics
 
 from ._helpers.indicators import generate_indicators
 
@@ -20,7 +20,7 @@ class DatasourceConfig:
         # Parse column_flags as Semantics and include_columns as DatasourceColumn
         parse_column_flags = \
             lambda kv: (kv[0], Semantics.parse(kv[1]))              if kv[0] == "column_flags" else \
-                       (kv[0], [ DatasourceColumn.from_dict(col_info) for col_info in kv[1] ])   if kv[0] == "include_columns" else \
+                       (kv[0], [ SourceColumn.from_dict(col_info) for col_info in kv[1] ])   if kv[0] == "include_columns" else \
                        (kv) 
         return cls(**{
             k: v for k, v in map(parse_column_flags, env.items())
@@ -38,7 +38,7 @@ class DatasourceConfig:
     # Indicators to generate data for. Used as input columns by default but may be disabled.
     indicators          : list[dict[str, Any]]   = field(default_factory = lambda: [])
     # Other columns to generate, as well as columns from the OHLCV data to include
-    include_columns     : list[DatasourceColumn] = field(default_factory = lambda: [])
+    include_columns     : list[SourceColumn] = field(default_factory = lambda: [])
     
     @property
     def generate_intervals(self):
@@ -89,7 +89,7 @@ class DatasourceConfig:
             
         return warnings
     
-class Datasource(ABC):
+class Source(ABC):
     def __init__(
             self,
             source_json: dict[str, dict]={},

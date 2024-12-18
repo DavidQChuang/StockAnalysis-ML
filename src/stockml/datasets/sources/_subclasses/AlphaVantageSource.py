@@ -2,7 +2,7 @@ import calendar
 import pytz
 from tqdm import tqdm
 
-from ..Common import Datasource, DatasourceConfig
+from ..Common import Source, DatasourceConfig
 
 import os
 import re
@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
-class AlphaVantageDatasource(Datasource):
+class AlphaVantageSource(Source):
     def _retrieve_dataframe(self, datasource_json: dict, config: DatasourceConfig, force_overwrite=False) -> pd.DataFrame:
         url = "https://www.alphavantage.co/query?"
         
@@ -86,7 +86,7 @@ class AlphaVantageDatasource(Datasource):
             # ... and replace the param list with a single value for each value in the list
             for each_value in param:
                 query_params_copy[_param_name] = each_value
-                urls += self.get_urls(**query_params_copy)
+                urls += self.get_urls(_current_date, **query_params_copy)
             return urls
         
         # Return single param

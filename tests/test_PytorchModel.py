@@ -1,5 +1,5 @@
 import unittest
-from stockml.datasets.Common import AdvancedTimeSeriesDataset, TimeSeriesDataset
+from stockml.datasets.Common import MultisourceTimeSeriesDataset, TimeSeriesDataset
 from stockml.models.Common import PytorchModel
 
 from stockml.models.SimpleLSTM import SimpleLSTM

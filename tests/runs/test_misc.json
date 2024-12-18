@@ -1,0 +1,12 @@
+{
+    "runs": {
+        "test_run": {
+            "dataset": {
+                "sources": {
+                    "source_a": {},
+                    "source_b": {}
+                }
+            }
+        }
+    }
+}

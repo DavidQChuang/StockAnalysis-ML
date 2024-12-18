@@ -65,7 +65,7 @@ class Semantics(Flag):
         return [ col.name.lower() for col, _ in expected_columns ] # type: ignore
 
 @dataclass
-class DatasourceColumn:
+class SourceColumn:
     @classmethod
     def from_dict(cls, env):
         return cls(**{

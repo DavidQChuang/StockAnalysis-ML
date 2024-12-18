@@ -13,14 +13,15 @@ from torch.utils import data
 
 from sklearn.preprocessing import StandardScaler
 
-from stockml.datasets.datasources import Datasource, Semantics, DatasourceColumn
+from stockml.vprint import vprint
+from stockml.datasets.sources import Source, Semantics, SourceColumn
 
 @dataclass
 class DatasetConfig:
     @classmethod
     def from_dict(cls, env):      
         parse_column_flags = \
-            lambda kv: (kv[0], [ DatasourceColumn.from_dict(col_json) for col_json in kv[1] ])   if kv[0] == "include_columns" else \
+            lambda kv: (kv[0], [ SourceColumn.from_dict(col_json) for col_json in kv[1] ])   if kv[0] == "include_columns" else \
                        (kv) 
                        
         return cls(**{
@@ -34,11 +35,11 @@ class DatasetConfig:
     seq_len     : int = 0
     out_seq_len : int = 0
     
-    datasources         : dict[str, dict[str, Any]] = field(default_factory = lambda: {})
-    # Fields passed to datasources
+    sources         : dict[str, dict[str, Any]] = field(default_factory = lambda: {})
+    # Fields passed to sources
     resample_intervals  : list[str]              = field(default_factory = lambda: [])
     indicators          : list[dict[str, Any]]   = field(default_factory = lambda: [])
-    include_columns     : list[DatasourceColumn] = field(default_factory = lambda: [])
+    include_columns     : list[SourceColumn] = field(default_factory = lambda: [])
     
     # Other parmaeters for use during inference training
     test_split        : float = 0.1
@@ -48,12 +49,12 @@ class DatasetConfig:
     target      : str = "close"
     
     @classmethod
-    def get_datasource_inherited_keys(cls):
+    def get_source_inherited_keys(cls):
         return ['resample_intervals', 'indicators', 'include_columns']
     
     @classmethod
-    def get_datasource_inherited_values(cls, dataset_json):
-        return { key: dataset_json[key] for key in cls.get_datasource_inherited_keys() }
+    def get_source_inherited_values(cls, dataset_json):
+        return { key: dataset_json[key] for key in cls.get_source_inherited_keys() }
     
 @dataclass
 class DataframeConfig:
@@ -236,34 +237,40 @@ class TimeSeriesDataset(Dataset):
         
         return train_dataloader, valid_dataloader
         
-class AdvancedTimeSeriesDataset(TimeSeriesDataset):
-    def __init__(self, dataset_json: dict[str, Any]): # type: ignore
+class MultisourceTimeSeriesDataset(TimeSeriesDataset):
+    def __init__(self, dataset_json: dict[str, Any], verbosity=0): # type: ignore
+        vprint(verbosity, 1,
+               f"│├[1/3] > Instantiating MultisourceTimeSeriesDataset.")
         self.conf = DatasetConfig.from_dict(dataset_json)
         
-        # Aggregate datasources
+        # Aggregate sources
         all_resample_intervals = set[str]()
         all_include_columns = set[str]()
         
-        data_sources: list[Datasource] = []
-        for source_name, source_json in self.conf.datasources.items():
-            if 'datasource_class' not in source_json:
-                raise Exception(f"'datasource_class' cannot be None in datasource {source_name}.")
+        vprint(verbosity, 1,
+               f"│├[2/3] > Loading sources [ {', '.join(self.conf.sources.keys())} ].")
+        data_sources: list[Source] = []
+        for source_name, source_json in self.conf.sources.items():
+            if 'source_class' not in source_json:
+                raise Exception(f"'source_class' cannot be None in source {source_name}.")
             
-            source_class_name = source_json['datasource_class']
-            SourceClass = Datasource.get_subclass(source_class_name)
+            source_class_name = source_json['source_class']
+            SourceClass = Source.get_subclass(source_class_name)
             
             # Use the dataset's values for these keys
-            # unless they're already given inside the datasource
-            copy_values = DatasetConfig.get_datasource_inherited_values(dataset_json)
+            # unless they're already given inside the source
+            copy_values = DatasetConfig.get_source_inherited_values(dataset_json)
             copy_values.update(source_json) # Overwrites the copy_values with source_json
             
             if SourceClass is not None:
                 source = SourceClass(source_json=copy_values)
                 data_sources.append(source)
             else:
-                raise Exception(f"Class of 'datasource_class' ({source_class_name}) could not be found in datasource {source_name}.")
+                raise Exception(f"Class of 'source_class' ({source_class_name}) could not be found in source {source_name}.")
         
         # Combine dataframes from data sources
+        vprint(verbosity, 1,
+               f"│└[3/3] > Combining sources.")
         dfs = []
         all_columns_set = set()
         all_columns = []

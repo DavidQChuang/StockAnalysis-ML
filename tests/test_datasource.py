@@ -4,21 +4,20 @@ import numpy as np
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
 
-from stockml.datasets.datasources import Datasource, DatasourceConfig, Semantics
+from stockml.datasets.sources import Source, DatasourceConfig, Semantics
 
-class TestDatasource(Datasource):
+class TestDatasource(Source):
     def __init__(self, force_overwrite=False):
         self.config = DatasourceConfig(
             name = "test",
             symbol = "TEST",
             interval = "1min",
-            column_flags = Semantics.TIMESTAMP | Semantics.OHLCV,
-            generate_intervals = True
+            column_flags = Semantics.TIMESTAMP | Semantics.OHLCV
         )
             
         super().__init__(config=self.config)
     
-    def _retrieve_dataframe(self, datasource_json: dict, config: DatasourceConfig, force_overwrite=False) -> DataFrame:
+    def _retrieve_dataframe(self, source_json: dict, config: DatasourceConfig, force_overwrite=False) -> DataFrame:
         # Create a date range
         date_rng = pd.date_range(start='2023-01-01', end='2023-01-10', freq='1h')
 
@@ -40,7 +39,7 @@ class TestDatasource(Datasource):
 class TestDatasourceMethods(unittest.TestCase):
 
     def test_intervals(self):
-        datasource = TestDatasource()
+        source = TestDatasource()
 
     # def test_upper(self):
     #     self.assertEqual('foo'.upper(), 'FOO')

@@ -5,10 +5,11 @@ from .Common import StandardTrader
 
 
 def from_run(run_data, device=None, use_deepspeed=False, **kwargs):
-    if 'trader' not in run_data:
-        raise ValueError("'trader' cannot be None.")
     if 'trader_name' not in run_data:
         raise ValueError("'trader_name' cannot be None.")
+    else:
+        if 'trader' not in run_data:
+            raise ValueError("'trader' cannot be None if the trader name is given.")
         
     if device == None:
         device = (

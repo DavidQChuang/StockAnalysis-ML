@@ -8,6 +8,8 @@ import traceback
 
 import torch.autograd.anomaly_mode as anomaly
 
+from stockml.vprint import vprint
+
 import stockml.runs
 import stockml.datasets
 import stockml.models 
@@ -36,7 +38,7 @@ def main_cmd():
     parser.add_argument('-rt', '--rebuild-trader', dest='rebuild_trader', action="store_true",
                         help='Used with --trader-file, if true then overwrites old trader.')
     
-    parser.add_argument('-v', '--verbosity', type=int, dest='verbosity',
+    parser.add_argument('-v', '--verbosity', type=int, dest='verbosity', default=1,
                         help="""0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
 1: default - the above + announcing each step, and stating basic operations and statistics such as the validation split and number of data rows, and small data previews.
 2: diagnostic - the above + model summary, 
@@ -75,7 +77,7 @@ def main(args: argparse.Namespace, worker= None, app= None):
     args_dict = vars(args)
         
     # Verbosity
-    verbosity = 1 if args.verbosity is None else args.verbosity
+    verbosity = args.verbosity
     
     if verbosity < 0 or verbosity > 2:
         print("! Invalid verbosity level. Must be 0-2. ")
@@ -84,9 +86,9 @@ def main(args: argparse.Namespace, worker= None, app= None):
     # Get a run from the run file
     try:
         if args.run_name is None:
-            run_data = stockml.runs.from_input(**args_dict)
+            run_data, run_name = stockml.runs.from_input(**args_dict)
         else:
-            run_data = stockml.runs.from_file(**args_dict)
+            run_data, run_name = stockml.runs.from_file(**args_dict)
         
     except Exception:
         print("! Failed to parse run. Printing exception: ")
@@ -94,8 +96,13 @@ def main(args: argparse.Namespace, worker= None, app= None):
         return -1
     
     # Start run:
+    vprint(verbosity, 0,f"[###] > Running {run_name}")
+    vprint(verbosity, 1, f"├[1/3] > Loading dataset.")
     dataset = stockml.datasets.from_run(run_data, **args_dict)
+    vprint(verbosity, 1, f"├[2/3] > Loading model.")
     model = stockml.models.from_run(run_data, dataset=dataset, **args_dict)
+    
+    # print(f"└[3/3] > Loaded {run_name}")
     
     if worker != None:
         worker.sig_dataset.emit(dataset)
