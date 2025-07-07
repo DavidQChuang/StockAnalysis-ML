@@ -2,9 +2,11 @@
 /.neptune
 /.vscode
 
-# Exclude random csv stuff, except monthlies
+# Exclude random csv stuff, keep whole months but not partial months.
 /csv/*
 !/csv/monthly
+!/csv/TIME_SERIES_*
+/csv/*/partial
 
 # Don't include checkpoints, as well as other things that have no reason to be in git.
 /ckpt

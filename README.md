@@ -1,4 +1,17 @@
 # ML Stock Analysis
+## Capabilities
+| Feature               | Usage             | Implemented?  |
+| -------------         | -------------     | ---           |
+| **Predictive** | For predicting future market performance. |
+| Simple Inference      | Predicts the value of the next datapoint based on market data. | Yes |
+| Sentiment Analysis         | Analyzes the sentiment of the market (bear or bull) based on market data.  | No |
+| News Sentiment Analysis    | Predicts the effect of news events on sentiment (negative or positive) and the magnitude of the resulting change in market price for each time interval, based on market data and language analysis. | No |
+| **Analytical** | For deriving additional meaning from market data, improving performance of predictive features.|
+| Sentiment Pattern Matching | Compares windows of market data, classifying each window in terms of market sentiment (bear or bull). | No |
+| PCA | Reduces the dimensionality of the data using eigenvectors. | No |
+| **Automatic** | For deriving action from market data and predictive/analytical data. |
+| Automatic Trader | Sends specific buy and sell orders based on market data, predictive/analytical data, and account data. | No |
+
 ## Usage
 Set environment variables in user-vars.sh, then call exec.sh. Arguments are passed through to the python program (see below for arguments).
 

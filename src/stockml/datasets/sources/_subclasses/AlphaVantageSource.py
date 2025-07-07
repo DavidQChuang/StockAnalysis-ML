@@ -179,23 +179,26 @@ class AlphaVantageSource(Source):
             "DIGITAL_CURRENCY_DAILY": "dc-d"
         }
         
-        
-        
+        # Add 'adj' and 'ext' to the end of the filename for adjusted and extended data
         if 'adjusted' not in query_params or query_params['adjusted'] == True:
             month += "adj"
         
         if 'extended' not in query_params or query_params['extended'] == True:
             month += "ext"
             
+        # Shorten min to m
         interval = re.sub(r"([0-9]+)min", r"\1m", interval)
         
         if function in functions:
             function = functions[function]
+        
+        # If the file doesn't contain a whole month put it in a different folder
+        if len(month.split('-')) == 3:
+            dir = os.path.join(dir, "partial")
                 
-        return 'csv/%s/%s%s%s%s.csv'%(
-            dir,
-            function, str(ticker),
-            param_name(interval), param_name(month))
+        return os.path.join(
+            'csv', dir, '%s%s%s%s.csv'%(
+                function, str(ticker), param_name(interval), param_name(month)))
         
     def download_csv(self, url: str, file_name: str, force_overwrite: bool=False):
         # timestamp,open,high,low,close,volume

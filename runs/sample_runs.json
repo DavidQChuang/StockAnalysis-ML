@@ -107,7 +107,7 @@
                     }
                 },
                 "resample_intervals": [
-                    "1min", "5min", "15min", "30min",
+                    "5min", "15min", "30min",
                     "1hr", "4hr", "1d", "4d", "1w" 
                 ],
                 "indicators": [
@@ -126,6 +126,7 @@
                     {
                         "function": "TA.MACD",
                         "is_scaled": true,
+                        "keep_resampled": true,
                         "offset": 26,
                         "params": {
                             "period_fast": 26,
@@ -135,11 +136,13 @@
                     {
                         "function": "np.diff(close)",
                         "name": "delta",
-                        "offset": 1
+                        "offset": 1,
+                        "keep_resampled": true
                     },
                     {
                         "function": "np.log(volume)",
-                        "name": "log_vol"
+                        "name": "log_vol",
+                        "keep_resampled": true
                     }
                 ],
                 "include_columns": [
