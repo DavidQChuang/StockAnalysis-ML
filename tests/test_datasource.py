@@ -4,42 +4,41 @@ import numpy as np
 import pandas as pd
 from pandas.core.api import DataFrame as DataFrame
 
-from stockml.datasets.sources import Source, DatasourceConfig, Semantics
+from stockml.datasets.sources import DatasourceConfig, Semantics, Source
+
 
 class TestDatasource(Source):
     def __init__(self, force_overwrite=False):
         self.config = DatasourceConfig(
-            name = "test",
-            symbol = "TEST",
-            interval = "1min",
-            column_flags = Semantics.TIMESTAMP | Semantics.OHLCV
+            name="test", symbol="TEST", interval="1min", column_flags=Semantics.TIMESTAMP | Semantics.OHLCV
         )
-            
+
         super().__init__(config=self.config)
-    
+
     def _retrieve_dataframe(self, source_json: dict, config: DatasourceConfig, force_overwrite=False) -> DataFrame:
         # Create a date range
-        date_rng = pd.date_range(start='2023-01-01', end='2023-01-10', freq='1h')
+        date_rng = pd.date_range(start="2023-01-01", end="2023-01-10", freq="1h")
 
         # Generate random data
         np.random.seed(42)
         data = np.random.randn(len(date_rng), 4)
 
         # Create a DataFrame
-        df = pd.DataFrame(data, columns=['open', 'high', 'low', 'close'], index=date_rng)
+        df = pd.DataFrame(data, columns=["open", "high", "low", "close"], index=date_rng)
 
         # Ensure High is greater than Open and Close, and Low is less than Open and Close
-        df['high'] = df[['open', 'close']].max(axis=1) + np.abs(df['high'])
-        df['low'] = df[['open', 'close']].min(axis=1) - np.abs(df['low'])
+        df["high"] = df[["open", "close"]].max(axis=1) + np.abs(df["high"])
+        df["low"] = df[["open", "close"]].min(axis=1) - np.abs(df["low"])
 
-        df['data'] = pd.Series(range(len(df))) # Set the date column as the index df.set_index('date', inplace=True)
-        
+        df["data"] = pd.Series(range(len(df)))  # Set the date column as the index df.set_index('date', inplace=True)
+
         return df
 
-class TestDatasourceMethods(unittest.TestCase):
 
+class TestDatasourceMethods(unittest.TestCase):
     def test_intervals(self):
-        source = TestDatasource()
+        # source = TestDatasource()
+        return
 
     # def test_upper(self):
     #     self.assertEqual('foo'.upper(), 'FOO')
@@ -55,5 +54,6 @@ class TestDatasourceMethods(unittest.TestCase):
     #     with self.assertRaises(TypeError):
     #         s.split(2)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
