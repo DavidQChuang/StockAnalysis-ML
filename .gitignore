@@ -14,13 +14,18 @@
 /venv
 /dist
 **/*.egg-info
+.coverage
+.python-version
 
-# Non example versions of are used for me, the dev
+# Non example versions of these are used for me, the dev
 user_vars.py
 user-vars.sh
 
+# Stuff created by the rocm install process
+*.whl
+*.deb
+
 # Build files
 dist/
-
 
 *.DS_Store

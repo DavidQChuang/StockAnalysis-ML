@@ -35,7 +35,7 @@ def get_path_in(path, dictionary):
     return dictionary
 
 def from_file(run_file: str, run_name: str, **kwargs) -> Tuple[dict, str]:
-    print("[###] > Reading run from run_file (default: runs/model_runs.json or runs/sample_runs.json).")
+    print(f"[###] > Reading runs from runfile (default: runs/model_runs.json or runs/sample_runs.json).")
     
     if run_file is None or run_file == "runs/model_runs.json":
         if os.path.exists("runs/model_runs.json"):
@@ -138,8 +138,16 @@ def from_file(run_file: str, run_name: str, **kwargs) -> Tuple[dict, str]:
         raise Exception("Runs file does not exist.")
     
 def from_input(run_file: str, **kwargs) -> Tuple[dict, str]:
-    print("> Selecting run from input. Runs:")
+    print(f"[###] > Reading run from runfile (default: runs/model_runs.json or runs/sample_runs.json).")
     
+    if run_file is None or run_file == "runs/model_runs.json":
+        if os.path.exists("runs/model_runs.json"):
+            run_file="runs/model_runs.json"
+        elif os.path.exists("runs/sample_runs.json"):
+            run_file="runs/sample_runs.json"
+        else:
+            raise Exception("Neither of the default run files exist.")
+        
     # Check for file
     if os.path.exists(run_file):
         with open(run_file) as file:
@@ -159,10 +167,12 @@ def from_input(run_file: str, **kwargs) -> Tuple[dict, str]:
     
     # Select run from input
     while True:
-        run_name = input("> Select run (enter to exit): ")
+        print("> Selecting run from stdin.")
+        run_name = input("> Provide run name. Enter to exit: ")
         
         if run_name == "":
-            break
+            print("! Aborting.")
+            return {}, None
         
         for name in run_names:
             if name.lower().startswith(run_name):

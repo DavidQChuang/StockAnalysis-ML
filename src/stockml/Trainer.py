@@ -5,6 +5,7 @@ from pytz import timezone
 
 import os
 import traceback
+from dotenv import load_dotenv
 
 import torch.autograd.anomaly_mode as anomaly
 
@@ -16,6 +17,8 @@ import stockml.models
 import stockml.traders
 
 def main_cmd():
+    load_dotenv()  # Loads from .env by default
+    
     parser = argparse.ArgumentParser(description='Args test')
     parser.add_argument('-r', '--run-name', type=str, dest='run_name',
                         help='Name of the run to use.')
@@ -89,6 +92,9 @@ def main(args: argparse.Namespace, worker= None, app= None):
             run_data, run_name = stockml.runs.from_input(**args_dict)
         else:
             run_data, run_name = stockml.runs.from_file(**args_dict)
+            
+        if run_name is None:
+            return 0
         
     except Exception:
         print("! Failed to parse run. Printing exception: ")
