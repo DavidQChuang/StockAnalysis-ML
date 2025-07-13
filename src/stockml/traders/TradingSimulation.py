@@ -14,8 +14,13 @@ class TradingSimulation:
         return self.starting_money / starting_price * current_price
 
     def step(self, action, current_price):
-        """Performs the given action (0b01 to sell, 0b10 to buy, 0b11 for both, 0b00 for none)
-        then returns the previous valuation.
+        """
+        Perform the given action then return the previous valuation.
+
+        Args:
+            action: 0b01 to sell, 0b10 to buy, 0b11 for both, 0b00 for none.
+            current_price: The current market price of the symbol.
+
         """
         prev_value = self.valuation(current_price)
         # sell
@@ -35,10 +40,10 @@ class TradingSimulation:
         return prev_value
 
     def scale_money(self, money):
-        return 2/(1 + math.exp(20*(1 - money/self.starting_money))) - 1
-    
+        return 2 / (1 + math.exp(20 * (1 - money / self.starting_money))) - 1
+
     def scale_delta(self, delta):
-        return 2/(1 + math.exp(20*(-delta/self.starting_money))) - 1
+        return 2 / (1 + math.exp(20 * (-delta / self.starting_money))) - 1
 
     @classmethod
     def state_size(cls):
@@ -53,5 +58,5 @@ class TradingSimulation:
             self.scale_money(self.money),
             self.scale_money(self.valuation(current_price)),
             self.scale_money(self.valuation(future_price)),
-            math.copysign(1, self.volume) * math.log(math.fabs(self.volume) + 1)
+            math.copysign(1, self.volume) * math.log(math.fabs(self.volume) + 1),
         ]

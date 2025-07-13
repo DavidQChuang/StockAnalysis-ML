@@ -1,5 +1,5 @@
-# conding=utf-8
+"""Contains helpers for aggregating data from multiple sources and preparing it for ML use."""
 
-from .Common import TimeSeriesDataset, MultisourceTimeSeriesDataset
-
-from ._runner import from_run
+from ._runner import from_run as from_run
+from .Common import MultisourceTimeSeriesDataset as MultisourceTimeSeriesDataset
+from .Common import TimeSeriesDataset as TimeSeriesDataset

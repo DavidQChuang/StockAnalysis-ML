@@ -1,12 +1,13 @@
-from stockml.datasets import TimeSeriesDataset
-from stockml.models.Common import StandardModel, get_bar_format
-from .TradingSimulation import TradingSimulation
-
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
+
+from stockml.datasets import TimeSeriesDataset
+from stockml.models.Common import StandardModel, get_bar_format
+
+from .TradingSimulation import TradingSimulation
 
 
 class TradingDataset(Dataset):
@@ -18,8 +19,9 @@ class TradingDataset(Dataset):
         columns = inference_model.conf.column_names
         self.real_len = real_len
 
-        print(f'> Generating inference data:')
-        print(f'Inference model window: {real_len}x{len(columns)}+{infer_len}; Trader window: {real_len}+{infer_len}+{TradingSimulation.state_size()}')
+        print("> Generating inference data:")
+        print(f"Inference model window: {real_len}x{len(columns)}+{infer_len};")
+        print(f"Trader window: {real_len}+{infer_len}+{TradingSimulation.state_size()}")
 
         device = torch.device(inference_model.device)
 
@@ -33,7 +35,7 @@ class TradingDataset(Dataset):
 
         # Generate future inferred datapoints
         self.inferences = []
-        for i, data in tqdm(enumerate(batch_data), total=len(batch_data), bar_format=bar_format):
+        for _i, data in tqdm(enumerate(batch_data), total=len(batch_data), bar_format=bar_format):
             X = torch.Tensor(data["X"]).float().to(device)
             y = inference_model.infer(X, False, False)
 
@@ -42,8 +44,10 @@ class TradingDataset(Dataset):
         print()
 
     def __len__(self):
+        """Return the number of datapoints available, which is the number of rows - the NN input window + 1."""
         return len(self.df) - self.real_len + 1
 
     def __getitem__(self, index):
-        real_values = self.df['close'][index: index + self.real_len]
-        return { "real": real_values.values, "inference": self.inferences[index] }
+        """Get the nth training pair, i.e. the preceding datapoints 'real' and the current datapoints 'inference'."""
+        real_values = self.df["close"][index : index + self.real_len]
+        return {"real": real_values.values, "inference": self.inferences[index]}
