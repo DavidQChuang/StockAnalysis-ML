@@ -17,96 +17,7 @@ from stockml.vprint import vprint
 
 def main_cmd():
     load_dotenv()  # Loads from .env by default
-
-    parser = argparse.ArgumentParser(description="Args test")
-    parser.add_argument("-r", "--run-name", type=str, dest="run_name", help="Name of the run to use.")
-
-    parser.add_argument(
-        "-rf",
-        "--run-file",
-        type=str,
-        dest="run_file",
-        default="runs/model_runs.json",
-        help="Path of the file to load the runs from.",
-    )
-
-    parser.add_argument(
-        "-mf",
-        "--model-file",
-        type=str,
-        dest="model_file",
-        help="Overrides the default path of the file to save/load the model from."
-        + "By default, the model decides a filename based on its parameters.",
-    )
-
-    parser.add_argument(
-        "-tf",
-        "--trader-file",
-        type=str,
-        dest="trader_file",
-        help="Overrides the default path of the file to save/load the model from."
-        + "By default, the model decides a filename based on its parameters.",
-    )
-
-    parser.add_argument(
-        "-rm",
-        "--rebuild-model",
-        dest="rebuild_model",
-        action="store_true",
-        help="Used with --model-file, if true then overwrites old model.",
-    )
-
-    parser.add_argument(
-        "-rt",
-        "--rebuild-trader",
-        dest="rebuild_trader",
-        action="store_true",
-        help="Used with --trader-file, if true then overwrites old trader.",
-    )
-
-    parser.add_argument(
-        "-v",
-        "--verbosity",
-        type=int,
-        dest="verbosity",
-        default=1,
-        help="""0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
-1: default - the above + announcing each step, and stating basic operations \\
-and statistics such as the validation split and number of data rows, and small data previews.
-2: diagnostic - the above + model summary, 
-                        """,
-    )
-
-    parser.add_argument("-d", "--device", type=str, dest="device", help="Device to run the model on (cuda, cpu).")
-
-    parser.add_argument("-ds", "--deepspeed", dest="use_deepspeed", action="store_true", help="Enables deepspeed.")
-
-    parser.add_argument("-vs", "--visualizer", dest="use_visualizer", action="store_true", help="Enables visualizer.")
-
-    parser.add_argument(
-        "-ei",
-        "--eval-inference",
-        dest="eval_inference_count",
-        type=int,
-        help="Enables evaluation mode for inference. "
-        "Gets the latest data and then runs the given number of inferences and prints them.",
-    )
-
-    parser.add_argument(
-        "-da",
-        "--detect-anomaly",
-        dest="detect_anomaly",
-        action="store_true",
-        help="Sets torch.autograd.set_detect_anomaly(True). Helps to debug anomalies in gradient calculation.",
-    )
-
-    # parser.add_argument('-et', '--eval-trader', dest='eval_trader_count', type=int,
-    #                     help="Enables evaluation mode for trading. "
-    #                     "Gets the latest data and then runs the given number of inferences, "
-    #                     "then runs the trader and prints the inferences and the trader's actions.")
-
-    # Parse args
-    args = parser.parse_args()
+    args = get_args() # Get command line arguments
 
     # If using visualizer, enter the Qt event loop and let it run the program.
     if args.use_visualizer:
@@ -271,6 +182,97 @@ def load_thing(model, model_file, rebuild_model):
 
     return model_file
 
+
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Args test")
+    parser.add_argument("-r", "--run-name", type=str, dest="run_name", help="Name of the run to use.")
+
+    parser.add_argument(
+        "-rf",
+        "--run-file",
+        type=str,
+        dest="run_file",
+        default="runs/model_runs.json",
+        help="Path of the file to load the runs from.",
+    )
+
+    parser.add_argument(
+        "-mf",
+        "--model-file",
+        type=str,
+        dest="model_file",
+        help="Overrides the default path of the file to save/load the model from."
+        + "By default, the model decides a filename based on its parameters.",
+    )
+
+    parser.add_argument(
+        "-tf",
+        "--trader-file",
+        type=str,
+        dest="trader_file",
+        help="Overrides the default path of the file to save/load the model from."
+        + "By default, the model decides a filename based on its parameters.",
+    )
+
+    parser.add_argument(
+        "-rm",
+        "--rebuild-model",
+        dest="rebuild_model",
+        action="store_true",
+        help="Used with --model-file, if true then overwrites old model.",
+    )
+
+    parser.add_argument(
+        "-rt",
+        "--rebuild-trader",
+        dest="rebuild_trader",
+        action="store_true",
+        help="Used with --trader-file, if true then overwrites old trader.",
+    )
+
+    parser.add_argument(
+        "-v",
+        "--verbosity",
+        type=int,
+        dest="verbosity",
+        default=1,
+        help="""0: quiet - only run selection, final metrics and trailing predicted prices will be printed.
+1: default - the above + announcing each step, and stating basic operations \\
+and statistics such as the validation split and number of data rows, and small data previews.
+2: diagnostic - the above + model summary, 
+                        """,
+    )
+
+    parser.add_argument("-d", "--device", type=str, dest="device", help="Device to run the model on (cuda, cpu).")
+
+    parser.add_argument("-ds", "--deepspeed", dest="use_deepspeed", action="store_true", help="Enables deepspeed.")
+
+    parser.add_argument("-vs", "--visualizer", dest="use_visualizer", action="store_true", help="Enables visualizer.")
+
+    parser.add_argument(
+        "-ei",
+        "--eval-inference",
+        dest="eval_inference_count",
+        type=int,
+        help="Enables evaluation mode for inference. "
+        "Gets the latest data and then runs the given number of inferences and prints them.",
+    )
+
+    parser.add_argument(
+        "-da",
+        "--detect-anomaly",
+        dest="detect_anomaly",
+        action="store_true",
+        help="Sets torch.autograd.set_detect_anomaly(True). Helps to debug anomalies in gradient calculation.",
+    )
+
+    # parser.add_argument('-et', '--eval-trader', dest='eval_trader_count', type=int,
+    #                     help="Enables evaluation mode for trading. "
+    #                     "Gets the latest data and then runs the given number of inferences, "
+    #                     "then runs the trader and prints the inferences and the trader's actions.")
+
+    # Parse args
+    return parser.parse_args()
 
 if __name__ == "__main__":
     main_cmd()

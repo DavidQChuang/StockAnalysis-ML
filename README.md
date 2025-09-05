@@ -13,7 +13,7 @@
 | Automatic Trader | Sends specific buy and sell orders based on market data, predictive/analytical data, and account data. | No |
 
 ## Usage
-Set environment variables in user-vars.sh, then call exec.sh. Arguments are passed through to the python program (see below for arguments).
+Set environment variables in .env, then call `uv run stockml-train <args>`. Arguments are passed through to the python program (see below for arguments).
 
 ### Runs
 'Runs' describe an NN architecture and dataset, which are used to perform time-series inference on the described stock or digital currency data. Runs will be read from `runs/model_runs.json` by default (see -rf below).
@@ -39,13 +39,12 @@ Example:
 }
 # See runs/sample_runs.json for sample runs.
 
-# In user-vars.sh:
+# In .env:
 export ALPHAVANTAGE_APIKEY=XXXX
 export OTHER_APIKEY=XXXX
-# export python_cmd="python3"
 
-# Then call exec.sh with command line args to run the program.
-$ exec.sh -r run-1
+# Then call uv run stockml-train with command line args to run the program.
+$ uv run stockml-train -r run-1
 ```
 ## Arguments
 `-r, --run-name`: Name of the run to use. If this doesn't match a run name, it will attempt to match the start of a run name, and if only one is found, it will use that run.
@@ -72,7 +71,7 @@ Default behavior is to continue training with the existing checkpoint.
 
 ## Sample run
 ```
-dqchuang@dqchuang-desktop:~/nas/stockanalysis-ml$ ./exec.sh -r intra-gmlp
+dqchuang@dqchuang-desktop:~/nas/stockanalysis-ml$ uv run stockml-train -r intra-gmlp
 > Reading run file runs/model_runs.json
 Copying from run Intra-LSTM-TQQQ
 > Running Intra-GMLP-TQQQ
@@ -129,7 +128,7 @@ Then, reboot and in GRUB, select the new kernel version, and run `sudo apt-get a
 ### Fix for ROCm torch.compile error:
 See [pytorch/pytorch#98707](https://github.com/pytorch/pytorch/issues/98707).
 
-Remove `/tmp/*` files, then add `export ROCM_PATH=/opt/rocm` to user-vars.sh.
+Remove `/tmp/*` files, then add `export ROCM_PATH=/opt/rocm` to .env.
 For me, it was sufficient to `rm -rf /tmp/*` without sudo and add the variable.
 
 Fixes:
